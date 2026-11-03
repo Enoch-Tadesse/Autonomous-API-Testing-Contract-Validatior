@@ -64,6 +64,26 @@ npx -y @mermaid-js/mermaid-cli -i docs/architecture.mmd -o docs/architecture.png
 
 Seeded bugs (`SEEDED_BUGS=ID,ID`): `BUG_RADIUS_MIN` (accepts `radius <= 0`), `BUG_DISTANCE_STRING` (`distance` is a string), `BUG_MISSING_LNG_500` (missing `lng` gives 500), `BUG_AUTH_BYPASS` (favorites without a token). Faults (`FAULTS=ID,ID`): `FAULT_503_THEN_OK` (two 503s, then normal), `FAULT_TIMEOUT_ALWAYS` (`/v1/favorites` hangs). `POST /__admin/reset` clears fault counters.
 
+## Web demo
+
+A local web UI for showing the agent at work: pick bugs and faults, launch a run, watch the decision log live, answer the agent when it asks, and read findings, evidence and the report. No login; it is a local demo.
+
+```bash
+scripts/demo.sh          # builds the UI on first use (needs Node 18+), then starts both servers
+# open http://localhost:8000
+```
+
+It starts the target API on `:9000` and the agent service on `:8000`; the service serves the built React app (`frontend/dist`) and its REST API on the same origin. Bugs and faults are switched per run through the target's `/__admin/config`, so no restart is needed. Each run uses about 2 Gemini calls; the top bar shows the count against the free tier's ~20 per day.
+
+| Page | What it shows |
+|---|---|
+| Overview | project summary, latest evaluation numbers, architecture diagram, and the New run panel (presets: Showcase, Clean API, All bugs, Ask me) |
+| Run | live status and counters, the decision log with retry/rerun/replan/fallback/ask badges, a question card when the run pauses, and tabs for findings, tasks, evidence and the rendered report (citations open the evidence) |
+| Runs | every run since the service started |
+| Evaluation | `eval/report.md` |
+
+For UI development: `uvicorn app.main:app` in one terminal and `cd frontend && npm run dev` in another (Vite on `:5173` proxies the API). The frontend is React + TypeScript + Vite in `frontend/`.
+
 ## 3. Agent pattern
 
 **Plan, act, validate, replan.** The planner turns the spec into a to-do list of tests (normal values, boundaries, missing, wrong type, out of range, no token), then asks the LLM to order them by risk and suggest a few extras. The executor runs one task with a tool. The validator checks the raw result with deterministic rules and picks the next move: go on, retry a broken request, rerun to confirm a defect, replan around a confirmed defect, or ask the user. The loop ends when the to-do list is empty or a budget runs out.

@@ -14,6 +14,7 @@ from pathlib import Path
 import yaml
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
+from pydantic import BaseModel
 
 SPEC_PATH = Path(__file__).with_name("openapi.yaml")
 VALID_TOKEN = os.environ.get("TARGET_API_TOKEN", "test-token")
@@ -34,9 +35,16 @@ FAVORITES = [{"id": "r1", "name": "Blue Nile"}, {"id": "r4", "name": "Sheger Caf
 # Fault counters, cleared by POST /__admin/reset.
 fault_counters: dict[str, int] = {}
 
+BUG_IDS = ["BUG_RADIUS_MIN", "BUG_DISTANCE_STRING", "BUG_MISSING_LNG_500", "BUG_AUTH_BYPASS"]
+FAULT_IDS = ["FAULT_503_THEN_OK", "FAULT_TIMEOUT_ALWAYS"]
+# Set by POST /__admin/config (the web demo). None means "use the env var".
+overrides: dict[str, set[str] | None] = {"SEEDED_BUGS": None, "FAULTS": None}
+
 
 def enabled(env_var: str) -> set[str]:
-    """Ids switched on in a comma separated env var, e.g. SEEDED_BUGS=BUG_A,BUG_B."""
+    """Ids switched on at runtime, or else in a comma separated env var, e.g. SEEDED_BUGS=BUG_A,BUG_B."""
+    if overrides[env_var] is not None:
+        return overrides[env_var]
     return {part.strip() for part in os.environ.get(env_var, "").split(",") if part.strip()}
 
 
@@ -144,6 +152,27 @@ async def favorites(request: Request):
     if not bug("BUG_AUTH_BYPASS") and auth != f"Bearer {VALID_TOKEN}":
         return error(401, "unauthorized", "missing or invalid bearer token")
     return {"favorites": FAVORITES}
+
+
+class AdminConfig(BaseModel):
+    bugs: list[str] = []
+    faults: list[str] = []
+
+
+@app.get("/__admin/config", include_in_schema=False)
+async def get_config():
+    return {"bugs": sorted(enabled("SEEDED_BUGS")), "faults": sorted(enabled("FAULTS")),
+            "known_bugs": BUG_IDS, "known_faults": FAULT_IDS}
+
+
+@app.post("/__admin/config", include_in_schema=False)
+async def set_config(config: AdminConfig):
+    unknown = [i for i in config.bugs if i not in BUG_IDS] + [i for i in config.faults if i not in FAULT_IDS]
+    if unknown:
+        return error(400, "unknown_id", f"unknown bug or fault ids: {unknown}")
+    overrides.update(SEEDED_BUGS=set(config.bugs), FAULTS=set(config.faults))
+    fault_counters.clear()
+    return await get_config()
 
 
 @app.post("/__admin/reset", include_in_schema=False)

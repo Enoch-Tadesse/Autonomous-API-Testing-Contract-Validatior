@@ -83,3 +83,15 @@ def test_fault_503_then_ok(client, monkeypatch):
 
     client.post("/__admin/reset")
     assert client.get(NEARBY, params=GOOD_QUERY).status_code == 503
+
+
+def test_runtime_config_switches_bugs_without_env(client):
+    assert client.get(NEARBY, params={**GOOD_QUERY, "radius": 0}).status_code == 400
+
+    set_ = client.post("/__admin/config", json={"bugs": ["BUG_RADIUS_MIN"], "faults": []})
+    assert set_.json()["bugs"] == ["BUG_RADIUS_MIN"]
+    assert client.get(NEARBY, params={**GOOD_QUERY, "radius": 0}).status_code == 200
+
+    assert client.post("/__admin/config", json={"bugs": ["BUG_NOPE"]}).status_code == 400
+    client.post("/__admin/config", json={"bugs": [], "faults": []})
+    assert client.get(NEARBY, params={**GOOD_QUERY, "radius": 0}).status_code == 400

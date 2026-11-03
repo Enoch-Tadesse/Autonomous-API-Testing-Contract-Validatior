@@ -6,3 +6,6 @@ __pycache__/
 *.pyc
 .pytest_cache/
 data/reports/*.md
+frontend/node_modules/
+frontend/dist/
+frontend/*.tsbuildinfo

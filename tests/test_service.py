@@ -69,3 +69,37 @@ async def test_pause_and_resume(monkeypatch, tmp_path):
         assert done["status"] == "complete"
 
     await with_service(tmp_path, test)
+
+
+async def test_demo_endpoints_and_details(monkeypatch, tmp_path):
+    monkeypatch.delenv("SEEDED_BUGS", raising=False)
+    monkeypatch.delenv("FAULTS", raising=False)
+
+    async def test(client):
+        info = (await client.get("/demo/info")).json()
+        assert info["model_kind"] == "fake" and info["llm_calls"] == 0
+        specs = {s["id"]: s for s in (await client.get("/demo/specs")).json()["specs"]}
+        assert set(specs) == {"standard", "undocumented"}
+        assert "flowchart" in (await client.get("/demo/architecture")).text
+
+        # the web demo switches target bugs per run, without env vars
+        started = await client.post("/runs", json={
+            "spec": specs["standard"]["text"], "base_url": "http://target", "label": "radius demo",
+            "config": {"interactive": False}, "target": {"bugs": ["BUG_RADIUS_MIN"], "faults": []}})
+        run_id = started.json()["run_id"]
+        await wait_until(client, run_id, {"complete", "partial", "error"})
+        assert (await client.get("/demo/target", params={"base_url": "http://target"})).json()["bugs"] == ["BUG_RADIUS_MIN"]
+
+        listed = (await client.get("/runs")).json()["runs"]
+        assert listed[0]["run_id"] == run_id and listed[0]["label"] == "radius demo"
+
+        details = (await client.get(f"/runs/{run_id}/details")).json()
+        assert details["findings"][0]["status"] == "confirmed" and details["unsupported"] == []
+        evidence_ids = {e["id"] for e in details["evidence"]}
+        assert set(details["findings"][0]["evidence_ids"]) <= evidence_ids
+        assert details["stats"]["replans"] == 1 and len(details["tasks"]) > 20
+
+        bad = await client.post("/demo/target", params={"base_url": "http://target"}, json={"bugs": ["NOPE"]})
+        assert bad.status_code == 400
+
+    await with_service(tmp_path, test)
