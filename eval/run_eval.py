@@ -160,10 +160,12 @@ def write_report(results: list[dict], budget_state: dict | None, llm_name: str) 
               "## Failures", ""]
     failures = [r for r in results if r["problems"]]
     lines += [f"- Scenario {r['scenario']['id']} ({r['scenario']['name']}): {'; '.join(r['problems'])}" for r in failures]
-    blocked = sum(1 for s in states for e in s["decision_log"] if e["decision"] == "blocked")
+    blocked_by = {r["scenario"]["id"]: sum(e["decision"] == "blocked" for e in r["state"]["decision_log"]) for r in results}
+    blocked = sum(blocked_by.values())
     if blocked:
+        where = ", ".join(f"scenario {i}: {n}" for i, n in blocked_by.items() if n)
         lines.append(f"- {blocked} task(s) were blocked by the 25-calls-per-endpoint cap and reported inconclusive "
-                     "(all-bugs scenario: reruns and follow-ups use the same endpoint budget).")
+                     f"({where}). Reruns, follow-ups and the model's extra tests share the same endpoint budget.")
     llm_errors = sum(r["llm_errors"] for r in results)
     if llm_errors:
         lines.append(f"- {llm_errors} LLM call(s) failed (provider overload or dropped connection); those steps used "
@@ -216,7 +218,8 @@ async def main() -> None:
             llm_errors = len(getattr(llm, "failures", [])) - failed_before
             seconds = time.time() - started
             if scenario["id"] == 2:
-                budget_state = await run_agent(scenario, url, llm, max_steps=6)
+                # Unscored demo of the budget stop; the fake LLM keeps it off the model's daily quota.
+                budget_state = await run_agent(scenario, url, FakeLLM(), max_steps=6)
         finally:
             stop_target(proc)
         problems = score(scenario, state)
