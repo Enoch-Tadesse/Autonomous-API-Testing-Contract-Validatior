@@ -1,0 +1,58 @@
+# Evaluation scenarios (spec section 13). Each one starts target_api with its bugs and faults,
+# runs the agent, and checks the result against `expect`.
+#
+# expect keys:
+#   confirmed:            exact set of confirmed finding classes ([] = no confirmed findings)
+#   min_evidence:         every confirmed finding cites at least this many evidence ids
+#   trace_contains:       text that must appear in some decision log reason
+#   inconclusive_endpoint: endpoint whose tasks must all end inconclusive
+#   asked:                the run paused at least once to ask the user
+#   status:               final run status
+
+- id: 1
+  name: no bugs (false positive check)
+  expect: {confirmed: [], status: complete}
+
+- id: 2
+  name: BUG_RADIUS_MIN
+  bugs: [BUG_RADIUS_MIN]
+  expect: {confirmed: [validation], min_evidence: 2}
+
+- id: 3
+  name: BUG_DISTANCE_STRING
+  bugs: [BUG_DISTANCE_STRING]
+  expect: {confirmed: [schema]}
+
+- id: 4
+  name: BUG_MISSING_LNG_500
+  bugs: [BUG_MISSING_LNG_500]
+  expect: {confirmed: [server_error]}
+
+- id: 5
+  name: BUG_AUTH_BYPASS
+  bugs: [BUG_AUTH_BYPASS]
+  expect: {confirmed: [auth]}
+
+- id: 6
+  name: all four bugs
+  bugs: [BUG_RADIUS_MIN, BUG_DISTANCE_STRING, BUG_MISSING_LNG_500, BUG_AUTH_BYPASS]
+  expect: {confirmed: [validation, schema, server_error, auth]}
+
+- id: 7
+  name: BUG_RADIUS_MIN + FAULT_503_THEN_OK
+  bugs: [BUG_RADIUS_MIN]
+  faults: [FAULT_503_THEN_OK]
+  expect: {confirmed: [validation], min_evidence: 2, trace_contains: "retry 1/2"}
+
+- id: 8
+  name: FAULT_TIMEOUT_ALWAYS
+  faults: [FAULT_TIMEOUT_ALWAYS]
+  config: {request_timeout_s: 1.0}
+  expect: {confirmed: [], inconclusive_endpoint: "GET /v1/favorites", status: complete}
+
+- id: 9
+  name: endpoint with no documented errors
+  spec: target_api/openapi_undocumented.yaml
+  interactive: true
+  answers: ["401"]
+  expect: {confirmed: [], asked: true, status: complete}

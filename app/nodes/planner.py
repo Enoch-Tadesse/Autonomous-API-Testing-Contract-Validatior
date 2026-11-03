@@ -35,8 +35,12 @@ async def planner(state: dict, runtime: Runtime[Deps]) -> dict:
         tasks = generate_tasks(endpoints)
         plan = await runtime.context.llm.structured(PlanOrder, plan_prompt(tasks, endpoints))
         tasks = apply_plan(tasks, plan, endpoints)
+        lookups = add_doc_lookups(tasks)
         update["endpoints"] = endpoints
         note("plan", f"{len(tasks)} tasks for {len(endpoints)} endpoints. {plan.rationale}")
+        if lookups:
+            note("add_lookup", f"{len(lookups)} case(s) have no documented response, searching docs first "
+                               f"({', '.join(t['id'] for t in lookups)})")
 
     elif state.get("clarifications") and (task := find(tasks, state.get("current_task_id"))) and \
             task["status"] == "in_progress":
@@ -84,6 +88,21 @@ def new_task(tasks: list[dict], endpoint: dict, kind: str, objective: str, reque
         "expected_schema": endpoint["responses"].get(expected[0]) if expected else None,
         "status": "pending", "outcome": "unknown", "attempts": 0, "parent_id": parent_id,
     }
+
+
+def add_doc_lookups(tasks: list[dict]) -> list[dict]:
+    """For each endpoint with undocumented cases, put a web_search task first. Its result helps the user answer."""
+    lookups = []
+    for endpoint in dict.fromkeys(t["endpoint"] for t in tasks if not t["expected_status"] and t["tool"] == "http_request"):
+        unclear = [t["objective"] for t in tasks if t["endpoint"] == endpoint and not t["expected_status"]]
+        path_words = endpoint.split(" ", 1)[1].replace("/", " ")
+        query = f"{path_words} expected HTTP status code for {unclear[0]}"
+        task = new_task(tasks, {"key": endpoint, "responses": {}}, "lookup", f"search docs: {unclear[0]}",
+                        {"query": query}, [])
+        task["tool"] = "web_search"
+        lookups.append(task)
+    tasks[:0] = lookups
+    return lookups
 
 
 # ---------- replan ----------

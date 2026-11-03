@@ -60,7 +60,7 @@ async def validator(state: dict, runtime: Runtime[Deps]) -> dict:
     if v["action"] in ("next", "replan"):
         task.update(status="done", outcome=v["outcome"])
     if v["action"] == "ask_user":
-        update["pending_question"] = question_for(task)
+        update["pending_question"] = question_for(task, doc_hint(state, task))
         update["status"] = "awaiting_input"
     return update
 
@@ -201,6 +201,16 @@ def make_finding(task: dict, evidence: dict, checks: list[dict], status: str, ev
     }
 
 
-def question_for(task: dict) -> str:
-    return (f"{task['id']} {task['endpoint']}: {task['objective']}. The spec documents no response for this case. "
+def doc_hint(state: dict, task: dict) -> str:
+    """Best snippet from a doc lookup on the same endpoint, if one ran."""
+    for e in reversed(state.get("evidence", [])):
+        if e["endpoint"] == task["endpoint"] and e["tool"] in ("web_search", "rag_search") and e["response"].get("output"):
+            hit = e["response"]["output"][0]
+            text = hit.get("snippet") or hit.get("text") or ""
+            return f" Docs found [{e['id']}]: \"{text[:200]}\"."
+    return ""
+
+
+def question_for(task: dict, hint: str = "") -> str:
+    return (f"{task['id']} {task['endpoint']}: {task['objective']}. The spec documents no response for this case.{hint} "
             "Which status code(s) should it return? Answer e.g. '400', or 'skip'.")

@@ -8,7 +8,8 @@ MASK = "***"
 SECRET_HEADERS = {"authorization", "cookie", "set-cookie", "x-api-key"}
 SECRET_FIELD_WORDS = ("password", "token", "secret")
 JWT = re.compile(r"eyJ[\w-]+\.[\w-]+\.[\w-]+")
-BEARER = re.compile(r"(?i)\bbearer\s+[\w.~+/=-]+")
+# A bearer credential, not prose like "needs a bearer token": 16+ token chars, or 6+ with a digit.
+BEARER = re.compile(r"(?i)\bbearer\s+(?:(?=[\w.~+/=-]*\d)[\w.~+/=-]{6,}|[\w.~+/=-]{16,})")
 
 
 def is_secret_key(key: str) -> bool:

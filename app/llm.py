@@ -105,18 +105,26 @@ class ChatLLM:
     def __init__(self, model):
         self.model = model
         self.calls: list[tuple[str, str]] = []
+        self.failures: list[str] = []      # one entry per failed call, read by the evaluation
 
     async def structured(self, schema: type[BaseModel], prompt: str) -> BaseModel:
         self.calls.append((schema.__name__, prompt))
         try:
             answer = await self.model.with_structured_output(schema).ainvoke(prompt)
-        except Exception as e:  # network, quota, schema or parsing errors
-            default = DEFAULTS[schema.__name__]()
-            note = f"LLM call failed ({type(e).__name__}: {str(e)[:120]}), used the safe default"
-            return default.model_copy(update={"rationale": note}) if hasattr(default, "rationale") else default
-        if answer is None:
-            return DEFAULTS[schema.__name__]()
-        return answer
+            if answer is None:
+                raise ValueError("model returned no structured output")
+            return answer
+        except Exception as e:  # network, quota, overload, schema or parsing errors
+            error = f"{type(e).__name__}: {str(e)[:120]}"
+            self.failures.append(f"{schema.__name__}: {error}")
+            return safe_default(schema, f"LLM call failed ({error}), used the safe default")
+
+
+def safe_default(schema: type[BaseModel], note: str) -> BaseModel:
+    """Default answer after a failed real call. An empty summary makes the reporter use its template."""
+    if schema is Summary:
+        return Summary(text="")
+    return DEFAULTS[schema.__name__]().model_copy(update={"rationale": note})
 
 
 def make_llm(fake: bool = False):
@@ -131,7 +139,9 @@ def make_llm(fake: bool = False):
 
     provider, _, model = name.rpartition(":")
     provider = provider or "google_genai"
-    kwargs: dict[str, Any] = {"temperature": 0}
+    # A short timeout and few retries: if the model is overloaded the run falls back to safe defaults
+    # within seconds instead of hanging in the client's own retry loop.
+    kwargs: dict[str, Any] = {"temperature": 0, "timeout": 60, "max_retries": 2}
     if provider == "google_genai":
         kwargs["api_key"] = os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")
     return ChatLLM(init_chat_model(model, model_provider=provider, **kwargs))

@@ -1,0 +1,15 @@
+flowchart LR
+    S([START]) --> P[Planner<br/>plan / to-do]
+    P -->|task pending| E[Executor<br/>calls tools]
+    P -->|no tasks or budget out| R[Reporter]
+    E --> V[Validator<br/>checks + critique]
+    E -.-> T[(Tools: http_request, web_search,<br/>run_python, rag_search, read_file)]
+    V -->|retry / rerun| E
+    V -->|defect found: replan<br/>or next task| P
+    V -->|ambiguous| A[Ask user]
+    A --> P
+    V -->|budget out| R
+    R --> X([END])
+    M[(State + evidence memory<br/>checkpointer)] -.-> P
+    M -.-> E
+    M -.-> V

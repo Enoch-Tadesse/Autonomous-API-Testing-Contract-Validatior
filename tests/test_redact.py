@@ -21,4 +21,5 @@ def test_authorization_header_and_token_field_are_hidden():
 def test_jwt_and_bearer_strings_are_hidden():
     assert JWT not in redact({"note": f"got {JWT} back"})["note"]
     assert "abc123" not in redact_body("error: Bearer abc123 rejected")
+    assert redact_body("The endpoint needs a Bearer token.") == "The endpoint needs a Bearer token."
     assert json.loads(redact_body(json.dumps({"access_token": "abc"})))["access_token"] == MASK
