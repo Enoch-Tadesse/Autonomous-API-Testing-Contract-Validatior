@@ -57,7 +57,7 @@ async def executor(state: dict, runtime: Runtime[Deps]) -> dict:
         body = (find_evidence(state, critique.get("evidence_id")) or {}).get("response", {}).get("body", "")
         fix = await deps.llm.structured(FixedRequest, fix_request_prompt(task, critique, body))
         if fix.request is not None:
-            args = fix.request.model_dump()
+            args = keep_tested_value(fix.request.to_request(), task["request"], task["param"])
             task["request"] = args
         note("repair_request", f"retry {retries[key]}: {fix.rationale}")
 
@@ -104,6 +104,18 @@ async def executor(state: dict, runtime: Runtime[Deps]) -> dict:
         "tool_calls": state.get("tool_calls", 0) + calls,
         "decision_log": entries,
     }
+
+
+def keep_tested_value(fixed: dict, original: dict, param: str | None) -> dict:
+    """A repair may change anything except the value under test (and it keeps the auth header)."""
+    if param:
+        if param in original.get("query", {}):
+            fixed["query"][param] = original["query"][param]
+        else:
+            fixed["query"].pop(param, None)
+    if "Authorization" in original.get("headers", {}):
+        fixed["headers"]["Authorization"] = original["headers"]["Authorization"]
+    return fixed
 
 
 def gate(tool: str, args: dict, ctx: ToolContext, state: dict, task: dict) -> str | None:

@@ -53,3 +53,4 @@ class Deps:
     tavily_api_key: str = field(default_factory=lambda: os.environ.get("TAVILY_API_KEY", ""))
     workspace_dir: str = field(default_factory=lambda: os.environ.get("WORKSPACE_DIR", "./workspace"))
     backoff_scale: float = 1.0                  # tests set 0 so transient retries do not sleep
+    reports_dir: str = "data/reports"

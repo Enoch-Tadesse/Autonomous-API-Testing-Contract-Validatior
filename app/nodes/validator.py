@@ -97,9 +97,11 @@ def classify(state: dict, task: dict, evidence: dict, checks: list[dict]) -> dic
         return None
 
     detail = "; ".join(f"{c['name']}: {c['detail']}" for c in fails)
-    if already_confirmed(state, finding_key(task, evidence, checks)) or task["parent_id"]:
+    if already_confirmed(state, finding_key(task, evidence, checks)) or task["parent_id"] or task["kind"] == "extra":
+        # Follow-ups add evidence to a known defect. Extras come from the LLM, so they can only raise a suspicion.
         finding = make_finding(task, evidence, checks, "suspected", [evidence["id"]])
-        return verdict("api_defect", "next", "defect", f"same defect class as a known finding. {detail}", finding)
+        why = "LLM-proposed test, so only suspected" if task["kind"] == "extra" else "same defect class as a known finding"
+        return verdict("api_defect", "next", "defect", f"{why}. {detail}", finding)
     if is_rerun:
         both = [previous["evidence_id"], evidence["id"]]
         if previous["signature"] == signature(evidence, checks):

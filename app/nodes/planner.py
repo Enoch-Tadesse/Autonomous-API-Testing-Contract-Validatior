@@ -15,7 +15,7 @@ from app.config import Deps
 from app.llm import PlanOrder
 from app.nodes.common import copy_tasks, find, log
 from app.prompts import plan_prompt
-from app.spec import generate_tasks, list_endpoints, load_spec
+from app.spec import base_request, generate_tasks, list_endpoints, load_spec
 from app.tools import FALLBACKS, UNAVAILABLE_AFTER, fallback_args
 
 MAX_EXTRA_TASKS = 5
@@ -64,10 +64,14 @@ def apply_plan(tasks: list[dict], plan: PlanOrder, endpoints: list[dict]) -> lis
     known = {e["key"]: e for e in endpoints}
     for extra in plan.extra_tasks[:MAX_EXTRA_TASKS]:
         endpoint = known.get(extra.endpoint)
-        if endpoint is None:
+        request = extra.request.to_request()
+        # Extras must target their own endpoint and expect only documented status codes.
+        expected = [c for c in extra.expected_status if c in endpoint["responses"]] if endpoint else []
+        if endpoint is None or request["path"] != endpoint["path"] or not expected:
             continue
-        expected = extra.expected_status
-        ordered.append(new_task(ordered, endpoint, "extra", extra.objective, extra.request.model_dump(), expected))
+        if endpoint["secured"] and "Authorization" not in request["headers"]:
+            request["headers"]["Authorization"] = base_request(endpoint)["headers"]["Authorization"]
+        ordered.append(new_task(ordered, endpoint, "extra", extra.objective, request, expected))
     return ordered
 
 

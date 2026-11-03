@@ -15,19 +15,20 @@ from target_api.main import app as target_app, fault_counters
 SPEC_TEXT = Path("target_api/openapi.yaml").read_text()
 
 
-async def run_agent(monkeypatch, bugs="", faults="", **config_overrides):
+async def run_agent(monkeypatch, tmp_path, bugs="", faults="", **config_overrides):
     monkeypatch.setenv("SEEDED_BUGS", bugs)
     monkeypatch.setenv("FAULTS", faults)
     fault_counters.clear()
     config = RunConfig(base_url="http://target", interactive=False, **config_overrides)
     graph = build_graph(InMemorySaver())
     cfg = {"configurable": {"thread_id": "test"}, "recursion_limit": recursion_limit(config.model_dump())}
-    deps = Deps(llm=FakeLLM(), http_transport=httpx.ASGITransport(app=target_app), backoff_scale=0)
+    deps = Deps(llm=FakeLLM(), http_transport=httpx.ASGITransport(app=target_app), backoff_scale=0,
+                reports_dir=str(tmp_path))
     return await graph.ainvoke(initial_state("test", SPEC_TEXT, config), cfg, context=deps)
 
 
-async def test_finds_radius_bug_end_to_end(monkeypatch):
-    state = await run_agent(monkeypatch, bugs="BUG_RADIUS_MIN", faults="FAULT_503_THEN_OK")
+async def test_finds_radius_bug_end_to_end(monkeypatch, tmp_path):
+    state = await run_agent(monkeypatch, tmp_path, bugs="BUG_RADIUS_MIN", faults="FAULT_503_THEN_OK")
 
     assert state["status"] == "complete"
     findings = merge_findings(state["findings"])
@@ -40,15 +41,19 @@ async def test_finds_radius_bug_end_to_end(monkeypatch):
     assert decisions.index("api_defect:rerun") < decisions.index("api_defect:replan") < decisions.index("replan")
     assert any("retry 1/2" in e["reason"] for e in state["decision_log"])   # the 503 fault was retried
 
+    report = Path(state["report_path"]).read_text()
+    assert "## Confirmed defects" in report and f"[{radius[0]['evidence_ids'][0]}]" in report
 
-async def test_no_bugs_no_findings(monkeypatch):
-    state = await run_agent(monkeypatch)
+
+async def test_no_bugs_no_findings(monkeypatch, tmp_path):
+    state = await run_agent(monkeypatch, tmp_path)
     assert state["status"] == "complete"
     assert state["findings"] == []
 
 
-async def test_small_budget_stops_partial_without_recursion_error(monkeypatch):
-    state = await run_agent(monkeypatch, max_steps=3)
+async def test_small_budget_stops_partial_without_recursion_error(monkeypatch, tmp_path):
+    state = await run_agent(monkeypatch, tmp_path, max_steps=3)
     assert state["status"] == "partial"
     assert state["stop_reason"] == "step_budget"
     assert state["steps"] == 3
+    assert "Partial run" in state["report_md"] and "step_budget" in state["report_md"]

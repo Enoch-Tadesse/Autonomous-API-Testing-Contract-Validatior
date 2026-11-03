@@ -50,3 +50,5 @@ class AgentState(TypedDict, total=False):
     replans: int
     status: Literal["running", "awaiting_input", "complete", "partial"]
     stop_reason: str | None
+    report_path: str | None                   # written by the reporter
+    report_md: str | None

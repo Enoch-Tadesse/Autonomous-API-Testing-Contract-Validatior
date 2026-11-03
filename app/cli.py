@@ -5,6 +5,7 @@
 
 import argparse
 import asyncio
+import os
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -40,6 +41,8 @@ def print_run(state: dict) -> None:
     for f in findings:
         print(f"  {f['id']} [{f['status']}] {f['class']} {f['endpoint']}: expected {f['expected']}, "
               f"got {f['actual']}\n      repro: {f['repro']}   evidence: {', '.join(f['evidence_ids'])}")
+    if state.get("report_path"):
+        print(f"\nReport: {state['report_path']}")
 
 
 async def main() -> None:
@@ -47,7 +50,9 @@ async def main() -> None:
     args = parse_args()
     llm = make_llm(fake=args.fake_llm)
     if isinstance(llm, FakeLLM):
-        print("Using the fake LLM (set AGENT_MODEL for the real one from phase 4 on).")
+        print("Using the fake LLM (set AGENT_MODEL and GEMINI_API_KEY in .env for the real one).")
+    else:
+        print(f"Using {os.environ['AGENT_MODEL']}.")
 
     config = RunConfig(base_url=args.base_url, interactive=not args.non_interactive,
                        max_steps=args.max_steps, max_tool_calls=args.max_tool_calls)
