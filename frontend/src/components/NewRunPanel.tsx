@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { AlertTriangle, Check, Loader2, Rocket } from "lucide-react";
+import { AlertTriangle, Bot, Check, Loader2, Lock, Rocket } from "lucide-react";
 import { api } from "../lib/api";
 import { go } from "../lib/router";
 import { BUGS, FAULTS, HELP, PRESETS, type HelpKey, type Preset } from "../lib/catalog";
@@ -94,7 +94,6 @@ export default function NewRunPanel({ info }: { info: DemoInfo | null }) {
     <section className="card" aria-labelledby="new-run-title">
       <div className="card-header">
         <h2 id="new-run-title" className="card-title"><Rocket size={16} aria-hidden /> New run</h2>
-        <span className="subtle mono" style={{ fontSize: 11.5 }}>{info?.target_url ?? ""}</span>
       </div>
       <div className="card-pad">
         <div className="field">
@@ -109,58 +108,86 @@ export default function NewRunPanel({ info }: { info: DemoInfo | null }) {
           </div>
         </div>
 
-        <div className="field">
-          <span className="field-label"><Label text="OpenAPI spec" help="spec" id="spec-label" /></span>
-          <div className="segmented" role="group" aria-labelledby="spec-label">
-            {SPEC_CHOICES.map(([id, label]) => (
-              <button key={id} type="button" aria-pressed={specId === id} onClick={() => { setSpecId(id); custom(); }}>
-                {label}
-              </button>
-            ))}
-          </div>
-          {specId === "custom" ? (
-            <>
-              <label htmlFor="spec-text" className="helper">YAML or JSON. Requests still go to the target URL above.</label>
-              <textarea id="spec-text" className="spec" value={customSpec} spellCheck={false}
-                onChange={(e) => setCustomSpec(e.target.value)} placeholder={"openapi: 3.1.0\npaths: ..."} />
-            </>
-          ) : (
-            <span className="helper">{specs.find((s) => s.id === specId)?.label ?? "Loading specs…"}</span>
-          )}
-        </div>
-
-        <div className="field">
-          <span className="field-label">
-            <Label text="Seeded bugs" help="bugs" /> <span className="subtle" style={{ fontWeight: 400 }}>{bugs.length} on</span>
-          </span>
-          <div className="toggles">
-            {Object.entries(BUGS).map(([id, b]) => (
-              <Toggle key={id} id={id} title={b.title} detail={b.detail} checked={bugs.includes(id)}
-                onChange={(on) => { setBugs(flip(bugs, id, on)); custom(); }} />
-            ))}
-          </div>
-        </div>
-
-        <div className="field">
-          <span className="field-label">
-            <Label text="Faults" help="faults" /> <span className="subtle" style={{ fontWeight: 400 }}>{faults.length} on</span>
-          </span>
-          <div className="toggles">
-            {Object.entries(FAULTS).map(([id, f]) => (
-              <Toggle key={id} id={id} title={f.title} detail={f.detail} checked={faults.includes(id)}
-                onChange={(on) => { setFaults(flip(faults, id, on)); custom(); }} />
-            ))}
-          </div>
-        </div>
-
-        <div className="field">
-          <div className="switch-row">
+        <div className="panel-block" role="group" aria-labelledby="block-agent">
+          <div className="block-head">
+            <span className="block-num" aria-hidden>1</span>
             <span>
-              <span className="field-label"><Label text="Ask me when unsure" help="ask" id="interactive-label" /></span>
-              <span className="helper">Pause on undocumented cases and wait for your answer.</span>
+              <span id="block-agent" className="block-title"><Bot size={15} aria-hidden /> Agent input</span>
+              <span className="helper">All the agent gets. It works everything else out by itself.</span>
             </span>
-            <button type="button" role="switch" className="switch" aria-checked={interactive}
-              aria-labelledby="interactive-label" onClick={() => { setInteractive(!interactive); custom(); }} />
+          </div>
+
+          <div className="field">
+            <span className="field-label"><Label text="OpenAPI spec" help="spec" id="spec-label" /></span>
+            <div className="segmented" role="group" aria-labelledby="spec-label">
+              {SPEC_CHOICES.map(([id, label]) => (
+                <button key={id} type="button" aria-pressed={specId === id} onClick={() => { setSpecId(id); custom(); }}>
+                  {label}
+                </button>
+              ))}
+            </div>
+            {specId === "custom" ? (
+              <>
+                <label htmlFor="spec-text" className="helper">YAML or JSON. Requests still go to the target URL below.</label>
+                <textarea id="spec-text" className="spec" value={customSpec} spellCheck={false}
+                  onChange={(e) => setCustomSpec(e.target.value)} placeholder={"openapi: 3.1.0\npaths: ..."} />
+              </>
+            ) : (
+              <span className="helper">{specs.find((s) => s.id === specId)?.label ?? "Loading specs…"}</span>
+            )}
+          </div>
+
+          <div className="field">
+            <span className="field-label" id="url-label">Target URL</span>
+            <code className="url-box" aria-labelledby="url-label">{info?.target_url ?? "…"}</code>
+          </div>
+
+          <div className="field" style={{ marginBottom: 0 }}>
+            <div className="switch-row">
+              <span>
+                <span className="field-label"><Label text="Ask me when unsure" help="ask" id="interactive-label" /></span>
+                <span className="helper">Pause on undocumented cases and wait for your answer.</span>
+              </span>
+              <button type="button" role="switch" className="switch" aria-checked={interactive}
+                aria-labelledby="interactive-label" onClick={() => { setInteractive(!interactive); custom(); }} />
+            </div>
+          </div>
+        </div>
+
+        <div className="panel-block hidden-setup" role="group" aria-labelledby="block-hidden">
+          <div className="block-head">
+            <span className="block-num" aria-hidden>2</span>
+            <span>
+              <span className="row wrap" style={{ gap: 8 }}>
+                <span id="block-hidden" className="block-title"><Lock size={14} aria-hidden /> Test dummy setup</span>
+                <span className="pill tone-grey" style={{ height: 22, fontSize: 11.5 }}>hidden from agent</span>
+              </span>
+              <span className="helper">Switched on inside the demo API before the run. The agent is never told; it has to find them.</span>
+            </span>
+          </div>
+
+          <div className="field">
+            <span className="field-label">
+              <Label text="Seeded bugs" help="bugs" /> <span className="subtle" style={{ fontWeight: 400 }}>{bugs.length} on</span>
+            </span>
+            <div className="toggles">
+              {Object.entries(BUGS).map(([id, b]) => (
+                <Toggle key={id} id={id} title={b.title} detail={b.detail} checked={bugs.includes(id)}
+                  onChange={(on) => { setBugs(flip(bugs, id, on)); custom(); }} />
+              ))}
+            </div>
+          </div>
+
+          <div className="field" style={{ marginBottom: 0 }}>
+            <span className="field-label">
+              <Label text="Faults" help="faults" /> <span className="subtle" style={{ fontWeight: 400 }}>{faults.length} on</span>
+            </span>
+            <div className="toggles">
+              {Object.entries(FAULTS).map(([id, f]) => (
+                <Toggle key={id} id={id} title={f.title} detail={f.detail} checked={faults.includes(id)}
+                  onChange={(on) => { setFaults(flip(faults, id, on)); custom(); }} />
+              ))}
+            </div>
           </div>
         </div>
 

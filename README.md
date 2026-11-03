@@ -1,10 +1,91 @@
-# Autonomous API Testing & Contract Validator
+<div align="center">
 
-An agent that takes an OpenAPI file and a base URL, tests every endpoint, finds places where the API breaks its own contract, and writes a short report in which every finding cites the evidence behind it.
+# 🛡️ Autonomous API Testing & Contract Validator
 
-It is a LangGraph `StateGraph` (no `create_react_agent`, no message list): a planner keeps a to-do list of tests, an executor calls tools, a validator checks every result and decides what to do next, and a reporter writes the report. It runs from the terminal or as a FastAPI service.
+**An AI agent that finds where an API breaks its own contract, and proves it.**
 
-## 1. Overview and architecture
+Give it an OpenAPI file and a URL. It plans the tests, calls the API through guarded tools, validates every response,
+reruns failures to confirm them, replans around defects, asks you when the spec is silent, and writes a report in which
+every finding cites its evidence.
+
+![Python](https://img.shields.io/badge/python-3.14-3776AB?logo=python&logoColor=white)
+![LangGraph](https://img.shields.io/badge/LangGraph-StateGraph-1C3C3C)
+![Gemini](https://img.shields.io/badge/LLM-Gemini-4285F4?logo=google&logoColor=white)
+![FastAPI](https://img.shields.io/badge/FastAPI-service-009688?logo=fastapi&logoColor=white)
+![React](https://img.shields.io/badge/React-web%20demo-61DAFB?logo=react&logoColor=black)
+![Tests](https://img.shields.io/badge/tests-51%20passing-22C55E)
+![Eval](https://img.shields.io/badge/eval-9%2F9%20·%20100%25%20detection%20·%200%20false%20positives-22C55E)
+
+![Web demo: overview and New run panel](docs/screenshots/overview.png)
+
+</div>
+
+---
+
+## ✨ At a glance
+
+| Requirement | How this project meets it | Where |
+|---|---|---|
+| Practical domain, clear goal | API contract testing: find contract violations, backed by evidence | [Overview](#-how-it-works) |
+| LangGraph with branches, loops and state | 5 nodes; every move out of planner, executor and validator is a conditional edge; retry, replan and ask-user loops; checkpointed `AgentState` | `app/graph.py`, `app/state.py` |
+| 5 tools from the execution categories | `http_request` · `web_search` · `run_python` · `rag_search` · `read_file`, all used in a normal run | [Tools](#-tools) |
+| Meta-tools | plan/to-do (planner) · critique (validator) · ask user (`interrupt`) · tool selection (fallbacks) | [Agent pattern](#-agent-pattern) |
+| Task state, validated outputs, citations, explained decisions | `Task` status and outcome · 7 deterministic checks on every response · evidence ids plus a citation check · `decision_log` with a reason for every step | [State](#-state), [Workflow](#-workflow) |
+| Runnable code and setup | one-command demo, CLI, REST service, 51 tests | [Quick start](#-quick-start) |
+| Architecture diagram | planner → tools → memory → validation → decision | [`docs/architecture.png`](docs/architecture.png) |
+| One-page evaluation | 9 scenarios, success rate, failures, limitations, improvements, agentic behavior | [`eval/report.md`](eval/report.md) |
+
+---
+
+## 🚀 Quick start
+
+**You need:** Python 3.14, Node 18+ (only for the web demo) and, optionally, a free [Gemini API key](https://aistudio.google.com/apikey).
+
+```bash
+git clone https://github.com/Enoch-Tadesse/Autonomous-API-Testing-Contract-Validatior.git
+cd Autonomous-API-Testing-Contract-Validatior
+
+python3.14 -m venv .venv
+.venv/bin/pip install -r requirements.txt
+
+cp .env.example .env        # then set GEMINI_API_KEY and AGENT_MODEL=google_genai:gemini-3.5-flash
+                            # (leave them empty to use the built-in fake LLM, with no key needed)
+
+scripts/demo.sh             # builds the web UI on first run, starts everything
+```
+
+Open **http://localhost:8000**. Ctrl+C stops both servers.
+
+> 💡 **No API key?** Leave `AGENT_MODEL` empty. The agent runs on a scripted fake LLM and still finds every bug, because findings come from deterministic checks, not from the model.
+
+### 🔎 Check it out in 5 minutes
+
+| # | Do this | What you should see |
+|---|---|---|
+| 1 | Open the **Overview** page | evaluation numbers, the four steps of the agent, the live architecture diagram |
+| 2 | Click **Showcase**, then **Launch run** | the decision log fills live: `DOCS` → `PLAN` → `COMPUTE` → `RETRY` (503) → `RERUN` → `CONFIRMED` → `REPLAN` → `DEFECT` → `COMPLETE` |
+| 3 | Open the **Findings** tab | **F1 confirmed**: `radius=0` accepted with 200; click an evidence id like `e_012` to see the real request and response |
+| 4 | Open the **Report** tab | the final markdown report; every `[e_…]` citation is clickable |
+| 5 | Click **Clean API**, then **Launch run** | **0 findings**: the false-positive check |
+| 6 | Click **Ask me**, then **Launch run** | the run pauses and asks what an undocumented case should return; click **401** and it finishes |
+| 7 | Click **All bugs**, then **Launch run** | four findings: validation, schema, server error, auth |
+| 8 | Open the **Evaluation** page | the 9-scenario report |
+
+<p align="center">
+  <img src="docs/screenshots/run.png" width="49%" alt="Run page: decision log with agentic badges and evidence">
+  <img src="docs/screenshots/ask-user.png" width="49%" alt="The agent pauses to ask the user">
+</p>
+
+> **The agent only ever gets the spec and the URL** (box 1 in the New run panel). Seeded bugs and faults (box 2) are switched on *inside the demo API* before the run; the agent is never told and has to find them. On a real API there is no box 2.
+
+---
+
+## 🧠 How it works
+
+![Architecture: planner → tools → memory → validation → decision](docs/architecture.png)
+
+<details>
+<summary>Mermaid source (renders on GitHub)</summary>
 
 ```mermaid
 flowchart LR
@@ -23,104 +104,89 @@ flowchart LR
     R --> X([END])
 ```
 
-Read it left to right: the **planner** picks a task, the executor runs one of the **tools**, the redacted result goes into **memory** (state and evidence, checkpointed), the **validator** checks it, and the **decision** router picks the next move. Source: `docs/architecture.mmd`; image: [`docs/architecture.png`](docs/architecture.png).
+</details>
 
-| Folder | What is in it |
+**One run, step by step:**
+
+1. **Read and plan.** The planner parses the OpenAPI file into test tasks (normal values, boundaries, missing, wrong type, out of range, no token). It reads the project notes with `read_file`, then makes **one LLM call** to order the tasks by risk and propose extra tests. It also adds doc lookups for undocumented cases and a pagination check.
+2. **Act.** The executor runs one task through a tool, behind a safety gate (allowlisted host, no mutating calls, call cap). It retries transient errors with backoff and switches to a fallback tool when one fails. The result is redacted and stored as evidence `e_001`, `e_002`, …
+3. **Validate.** The validator runs 7 deterministic checks on every response (status, JSON, content type, schema, range, …) and decides what happens next.
+4. **Decide.** All checks pass → next task. A defect → **rerun** to confirm. Same failure twice → **confirmed**, then **replan** with neighbor values. Our own request was broken → **retry** with an LLM-repaired request. The spec is silent → **ask the user**. A budget ran out → report.
+5. **Report.** Findings are merged, citation-checked and summarized, and the report is written to `data/reports/<run_id>.md`.
+
+---
+
+## 🤖 Agent pattern
+
+**Plan → act → validate → decide (retry · rerun · replan · ask), in a loop until the to-do list is empty or a budget runs out.**
+
+It's agentic, not a script, because the path depends on what the API does:
+- a 503 is retried;
+- a defect is rerun to confirm it, and a confirmed defect makes the planner add new tests around it;
+- a failing tool is swapped for its fallback;
+- an undocumented case pauses the run for a human.
+
+Every move is a conditional edge decided from state, and every decision is logged with a reason.
+
+| Meta-tool | Implementation |
 |---|---|
-| `app/` | the agent: `graph.py` (wiring and routers), `nodes/`, `tools/`, `spec.py` (OpenAPI to tasks), `checks.py`, `redact.py`, `llm.py`, `prompts.py`, `cli.py`, `main.py` (FastAPI) |
-| `target_api/` | a small FastAPI app with switchable bugs and faults, and its `openapi.yaml` |
-| `eval/` | `scenarios.yaml`, `run_eval.py` and the generated `report.md` |
-| `workspace/` | docs the `read_file` and `rag_search` tools may read |
-| `tests/` | pytest suite (`pytest -q`) |
+| **Plan / to-do** | `app/nodes/planner.py`: the only node that adds, orders or cancels tasks; the task list in state *is* the to-do list |
+| **Critique** | `app/nodes/validator.py`: a critique for every result; rules first, an LLM `Critique` only when no rule fits |
+| **Ask user** | `app/nodes/ask_user.py`: LangGraph `interrupt()`; resume with `Command(resume=answer)` |
+| **Tool selection** | `app/nodes/executor.py` and `app/tools/__init__.py`: switch to the `FALLBACKS` tool; stop choosing a tool after 5 failures in a row |
 
-## 2. Setup
+**The LLM is an advisor, not a judge.** It's used in exactly four places: ordering the plan, repairing a broken request, classifying a result no rule fits, and writing the summary. It can never confirm a finding on its own, and if it's unavailable (quota, outage) every call falls back to a safe default and the run still completes.
 
-Python 3.14 (all dependencies import cleanly on 3.14.6).
+---
 
-```bash
-python3.14 -m venv .venv && source .venv/bin/activate
-pip install -r requirements.txt          # exact versions in requirements.lock.txt
-cp .env.example .env                     # set GEMINI_API_KEY and AGENT_MODEL for the real model
-```
+## 🧰 Tools
 
-The Gemini free tier allows about 20 requests per day per model; a full `python -m eval.run_eval` uses about 20 (two per run). When a model call fails (quota, overload), the run continues on safe defaults and the eval report counts the failures. Without `AGENT_MODEL` the agent uses a scripted fake LLM, so everything below also runs without an API key. `TAVILY_API_KEY` is optional: without it `web_search` falls back to `rag_search`.
+All five tools are used by the agent in a normal run, not only in tests.
 
-```bash
-# 1. the API under test (bugs and faults are optional)
-SEEDED_BUGS=BUG_RADIUS_MIN FAULTS=FAULT_503_THEN_OK uvicorn target_api.main:app --port 9000
+| Category | Tool | When the agent uses it | Safety limits | Fallback |
+|---|---|---|---|---|
+| Function calling | `http_request` | every contract test, plus the two pagination pages | base-URL allowlist · `POST/PUT/PATCH/DELETE` need `allow_mutating` · 25 calls per endpoint · timeout · real token inserted only at send time | none: the task becomes inconclusive |
+| System and environment | `read_file` | first step: reads the project notes in `workspace/` as context for the plan | inside `WORKSPACE_DIR` only · path traversal rejected · 4 KB | `rag_search` |
+| Code and compute | `run_python` | pagination check: a generated script compares page 1 and page 2 (no duplicates, within `total`, order kept) | `python -I` · empty env · temp dir · no shell · 5 s timeout · 4 KB output | none |
+| Search | `web_search` | the spec leaves a case undocumented: look it up before asking | Tavily over `httpx` · top 5 | `rag_search` |
+| RAG | `rag_search` | fallback for search and docs: keyword retrieval over spec chunks and notes | top 3 · no match counts as a failure | `web_search` |
 
-# 2. the agent, from the terminal
-python -m app.cli --spec target_api/openapi.yaml --base-url http://localhost:9000
+Every tool output is validated: HTTP responses by the deterministic checks, the `run_python` result by parsing and judging its JSON, and the other tools for a usable result. `app/redact.py` masks `Authorization`, `Cookie`, `X-API-Key`, password/token/secret fields, JWTs and bearer credentials before anything is stored. API responses reach the LLM only between untrusted-data delimiters.
 
-# 3. or the agent as a service
-uvicorn app.main:app
+---
 
-# tests and evaluation
-pytest -q
-python -m eval.run_eval                  # writes eval/report.md
-```
+## 🗂️ State
 
-Seeded bugs (`SEEDED_BUGS=ID,ID`): `BUG_RADIUS_MIN` (accepts `radius <= 0`), `BUG_DISTANCE_STRING` (`distance` is a string), `BUG_MISSING_LNG_500` (missing `lng` gives 500), `BUG_AUTH_BYPASS` (favorites without a token). Faults (`FAULTS=ID,ID`): `FAULT_503_THEN_OK` (two 503s, then normal), `FAULT_TIMEOUT_ALWAYS` (`/v1/favorites` hangs). `POST /__admin/reset` clears fault counters.
-
-## Web demo
-
-A local web UI for showing the agent at work: pick bugs and faults, launch a run, watch the decision log live, answer the agent when it asks, and read findings, evidence and the report. No login; it is a local demo.
-
-```bash
-scripts/demo.sh          # builds the UI on first use (needs Node 18+), then starts both servers
-# open http://localhost:8000
-```
-
-It starts the target API on `:9000` and the agent service on `:8000`; the service serves the built React app (`frontend/dist`) and its REST API on the same origin. Bugs and faults are switched per run through the target's `/__admin/config`, so no restart is needed. Each run uses about 2 Gemini calls; the top bar shows the count against the free tier's ~20 per day.
-
-| Page | What it shows |
-|---|---|
-| Overview | project summary, latest evaluation numbers, architecture diagram, and the New run panel (presets: Showcase, Clean API, All bugs, Ask me) |
-| Run | live status and counters, the decision log with retry/rerun/replan/fallback/ask badges, a question card when the run pauses, and tabs for findings, tasks, evidence and the rendered report (citations open the evidence) |
-| Runs | every run since the service started |
-| Evaluation | `eval/report.md` |
-
-For UI development: `uvicorn app.main:app` in one terminal and `cd frontend && npm run dev` in another (Vite on `:5173` proxies the API). The frontend is React + TypeScript + Vite in `frontend/`.
-
-## 3. Agent pattern
-
-**Plan, act, validate, replan.** The planner turns the spec into a to-do list of tests (normal values, boundaries, missing, wrong type, out of range, no token), then asks the LLM to order them by risk and suggest a few extras. The executor runs one task with a tool. The validator checks the raw result with deterministic rules and picks the next move: go on, retry a broken request, rerun to confirm a defect, replan around a confirmed defect, or ask the user. The loop ends when the to-do list is empty or a budget runs out.
-
-Why it is agentic and not a script: the path through the graph depends on what the API does. A defect triggers a rerun, a reproduced defect triggers a replan that adds new tests around it, a transient failure is retried with backoff, a failing tool is swapped for its fallback, and an undocumented case pauses the run to ask a human. Every move is a conditional edge decided from state, and every decision is written to `decision_log` with a reason.
-
-The LLM is used in exactly four places (ordering the plan, repairing a request on retry, classifying a result no rule fits, writing the summary). It cannot confirm a finding on its own: confirmation needs two independent calls that show the same violation of a documented expectation.
-
-## 4. State
-
-`AgentState` (`app/state.py`) is a `TypedDict` of plain JSON-friendly values, checkpointed by `InMemorySaver`. Fields marked *append* use an `operator.add` reducer.
+`AgentState` (`app/state.py`) is a `TypedDict` of plain JSON values, checkpointed with `InMemorySaver`. *Append* fields use an `operator.add` reducer.
 
 | Field | Written by | Meaning |
 |---|---|---|
-| `run_id`, `base_url`, `config`, `started_at`, `spec_text` | start of run | inputs and `RunConfig` |
-| `endpoints` | planner | operations parsed from the OpenAPI file |
-| `tasks` | planner (add, order, cancel), executor (attempts, repaired request), validator (status, outcome) | the to-do list |
-| `current_task_id`, `tool_name`, `tool_args` | planner, executor | the task being worked on and how |
+| `run_id`, `base_url`, `config`, `started_at`, `spec_text` | start of run | the inputs: spec, URL and `RunConfig` |
+| `endpoints`, `planned` | planner | parsed operations; whether the planning call has run |
+| `tasks` | planner, executor, validator | the to-do list: each `Task` has `status`, `outcome`, `attempts`, `parent_id`, `depends_on` |
+| `current_task_id`, `tool_name`, `tool_args` | planner, executor | what is running now, and with which tool |
 | `last_result` | executor | outcome of the last tool call and its evidence id |
-| `evidence` *append* | executor | redacted request and response, `e_001`, `e_002`, ... |
-| `critiques` *append* | validator | issue, feedback, action and the checks for each result |
-| `findings` *append* | validator | defects with class, status (`confirmed`/`suspected`) and evidence ids |
+| `evidence` *append* | executor | redacted request and response per call: `e_001`, `e_002`, … |
+| `critiques` *append* | validator | issue, feedback, action and checks for every result |
+| `findings` *append* | validator | defects with class, `confirmed`/`suspected` status and evidence ids |
 | `decision_log` *append* | every node | `{step, node, decision, reason}` |
 | `clarifications` *append*, `pending_question` | ask_user, validator | human-in-the-loop questions and answers |
-| `action` | validator, planner | the validator's verdict: `next`, `retry`, `rerun`, `replan`, `ask_user` |
-| `retries`, `tool_failures` | executor | retries per `task:tool`, consecutive failures per tool |
-| `steps`, `tool_calls`, `replans` | executor, planner | budget counters |
-| `status`, `stop_reason`, `report_path`, `report_md` | reporter, validator, ask_user | final state and the report |
+| `action` | validator, planner | verdict: `next`, `retry`, `rerun`, `replan`, `ask_user` |
+| `retries`, `tool_failures`, `steps`, `tool_calls`, `replans` | executor, planner | retry and budget counters |
+| `status`, `stop_reason`, `report_path`, `report_md` | reporter | final status and the report |
 
-Run-time dependencies (the LLM, HTTP transports, API keys) are passed through LangGraph's `context` (`app.config.Deps`), so they are never checkpointed and tests can swap them.
+Run-time dependencies (LLM, HTTP transports, keys) are passed through LangGraph's `context` (`app.config.Deps`), so they're never checkpointed and tests can swap them.
 
-## 5. Workflow
+---
 
-Routers (`app/graph.py`) are pure functions of state; the first matching rule wins and rule 1 is always the budget guard.
+## 🔀 Workflow
+
+Routers in `app/graph.py` are pure functions of state, unit-tested row by row. The first matching rule wins, and **rule 1 is always the budget guard**.
 
 | After | # | Condition | Next |
 |---|---|---|---|
 | planner | 1 | budget exhausted | reporter |
-| planner | 2 | no task is pending | reporter |
+| planner | 2 | no task left | reporter |
 | planner | 3 | otherwise | executor |
 | executor | 1 | budget exhausted | reporter |
 | executor | 2 | otherwise | validator |
@@ -130,9 +196,9 @@ Routers (`app/graph.py`) are pure functions of state; the first matching rule wi
 | validator | 4 | `action == "replan"` and `replans < max_replans` | planner |
 | validator | 5 | otherwise (`next`) | planner |
 
-`ask_user` always returns to the planner, and the reporter goes to `END`.
+`ask_user` always returns to the planner; the reporter goes to `END`.
 
-How the validator classifies a result (rules first, LLM only when none fits):
+How the validator classifies a result:
 
 | Situation | Issue | Action |
 |---|---|---|
@@ -141,60 +207,53 @@ How the validator classifies a result (rules first, LLM only when none fits):
 | a 400 that blames a different parameter than the one under test | `test_error` | `retry` with an LLM-repaired request |
 | timeout, connection error, 502/503/504 after retries | `infra_failure` | `next`, task `inconclusive` |
 | no documented response for the case | `ambiguous` | `ask_user` (interactive) or `next` |
+| none of the above | LLM critique | at most a *suspected* finding |
 
-## 6. Tools
+---
 
-Every tool is used by the agent in a normal run, not only in tests:
+## 🛑 Stopping rules, retries and fallbacks
 
-| Category | Tool | When the agent uses it | Limits | Fallback |
-|---|---|---|---|---|
-| Function calling | `http_request` | every contract test (normal, boundary, missing, wrong type, out of range, no token, pagination pages) | base URL allowlist, `POST/PUT/PATCH/DELETE` need `allow_mutating`, 25 calls per endpoint per run, request timeout, token inserted only at send time | none: the task becomes inconclusive |
-| System | `read_file` | first step: reads the project notes in `workspace/`, which go into the planning LLM call as context | inside `WORKSPACE_DIR` only, path traversal rejected, 4 KB | `rag_search` |
-| Code and compute | `run_python` | pagination check: after fetching page 1 and page 2, runs a generated script over both responses (no duplicate ids, item count within `total`, order kept across pages) | `python -I` subprocess, empty env, temp dir, no shell, 5 s timeout, 4 KB output | none |
-| Search | `web_search` | when the spec leaves a case undocumented: looks up what the status should be before asking the user | Tavily over `httpx`, top 5 results | `rag_search` |
-| RAG | `rag_search` | fallback for search and docs: keyword search over spec chunks and workspace docs | top 3 chunks; no match counts as a failure | `web_search` |
+| | Rule |
+|---|---|
+| **Complete** | the to-do list is empty |
+| **Partial** | a budget ran out (`max_steps` 50, `max_tool_calls` 60, `max_seconds` 300); the report starts with the stop reason |
+| **Transient retries** | timeout, 502, 503 and 504 are retried with backoff `min(0.5·2ⁿ, 4)` s, up to 2 times |
+| **Per task** | at most 2 validator-driven retries per `task:tool` and 3 attempts in total, then inconclusive |
+| **Confirmation** | a defect is rerun; same failure twice → confirmed, otherwise suspected |
+| **Replans** | at most 3 |
+| **Fallbacks** | `web_search ↔ rag_search`, `read_file → rag_search`; a tool with 5 failures in a row is skipped |
+| **LLM failure** | any model error (quota, overload) → safe default; findings are unaffected |
+| **Backstop** | `recursion_limit = max_steps·3 + 20`; the budget guard always fires first (tested) |
 
-The question to the user quotes what the lookup found. A tool with 5 failures in a row is no longer chosen. Every tool output is validated: HTTP responses by the deterministic checks, the `run_python` check by parsing and judging its JSON result, and the other tools for a usable result. Before anything is stored, `redact.py` masks `Authorization`, `Cookie`, `X-API-Key`, fields named like `password`/`token`/`secret`, JWTs and bearer credentials. API responses are passed to the LLM between untrusted-data delimiters, with an instruction never to follow them.
+Order of recovery: **retry → fallback tool → replan → ask the user (or mark inconclusive) → partial report** with what was verified.
 
-## 7. Stopping rules, retries and fallbacks
+---
 
-- **Complete:** the to-do list is empty. **Partial:** a budget ran out (`max_steps` 50, `max_tool_calls` 60, `max_seconds` 300); the report starts with the stop reason and lists what was not run.
-- **Transient failures** (timeout, 502, 503, 504) are retried inside the executor with backoff `min(0.5 * 2**n, 4)` s, up to `max_retries_per_tool` (2).
-- **Per task:** at most 2 validator-driven retries per `task:tool` and 3 attempts in total; after that the task is inconclusive.
-- **Replans:** at most `max_replans` (3).
-- **Backstop:** `recursion_limit = max_steps * 3 + 20`. The budget guard always fires first, so `GraphRecursionError` never happens (tested).
-- **Order of recovery:** retry with a repaired request, switch to the fallback tool, replan, ask the user (or mark inconclusive), and finally write a partial report with what was verified.
+## 🙋 Human in the loop
 
-## 8. Human in the loop
-
-When the spec does not document what a case should return, an interactive run pauses with LangGraph `interrupt()` and the question is exposed by the service. Resuming with `Command(resume=answer)` continues from the checkpoint; status codes in the answer become the expectation and the test is re-run. Any other answer (for example `skip`) marks it inconclusive.
+When the spec doesn't document what a case should return, an interactive run pauses with `interrupt()`. In the web demo a question card appears, quoting what the docs lookup found. Through the REST API:
 
 ```bash
-uvicorn app.main:app &      # the service, on :8000
-
-# start a run (spec is the OpenAPI text); here the 401 for /v1/favorites is undocumented
+# start a run: the spec is the OpenAPI text, and here the 401 for /v1/favorites is undocumented
 curl -s -X POST localhost:8000/runs -H 'content-type: application/json' \
-  -d "$(python -c 'import json; print(json.dumps({"spec": open("target_api/openapi_undocumented.yaml").read(), "base_url": "http://localhost:9000"}))')"
+  -d "$(python3 -c 'import json; print(json.dumps({"spec": open("target_api/openapi_undocumented.yaml").read(), "base_url": "http://localhost:9000"}))')"
 # {"run_id":"run_9a9ebc3d","status":"running"}
 
 curl -s localhost:8000/runs/run_9a9ebc3d
 # {"status":"awaiting_input","pending_question":"t_023 GET /v1/favorites: request without a bearer token. The spec
-#  documents no response for this case. Docs found [e_001]: \"The favorites endpoint needs a bearer token. A missing
-#  or wrong token returns HTTP 401.\". Which status code(s) should it return? ...", "steps":27, ...}
+#  documents no response for this case. Docs found [e_001]: \"... A missing or wrong token returns HTTP 401.\" ..."}
 
 curl -s -X POST localhost:8000/runs/run_9a9ebc3d/resume -H 'content-type: application/json' -d '{"answer": "401"}'
-# {"run_id":"run_9a9ebc3d","status":"running"}
-
-curl -s localhost:8000/runs/run_9a9ebc3d            # "status":"complete"
-curl -s localhost:8000/runs/run_9a9ebc3d/trace      # decision log
-curl -s localhost:8000/runs/run_9a9ebc3d/report     # markdown report
+curl -s localhost:8000/runs/run_9a9ebc3d/report    # once "status" is "complete"
 ```
 
-Endpoints: `POST /runs`, `GET /runs/{id}`, `GET /runs/{id}/trace`, `POST /runs/{id}/resume`, `GET /runs/{id}/report`, `GET /health`. Pass `"config": {"interactive": false}` to never pause.
+Status codes in the answer become the expectation and the test is re-run; `skip` marks it inconclusive.
 
-## 9. Real execution trace
+---
 
-From `decision_log` of a real CLI run with the real model (`gemini-3.5-flash`) against `target_api` started with `SEEDED_BUGS=BUG_RADIUS_MIN FAULTS=FAULT_503_THEN_OK` (`python -m app.cli --spec target_api/openapi.yaml --base-url http://localhost:9000 --non-interactive`). Passing checks and routine task picks are left out.
+## 📜 Real execution trace
+
+From the `decision_log` of a real run with **gemini-3.5-flash** against the demo API with `BUG_RADIUS_MIN` and `FAULT_503_THEN_OK` (routine steps left out):
 
 ```
 step 01 planner   plan                   25 tasks for 2 endpoints. Authentication checks and invalid input validation edge cases are prioritized first to ensure security and boundary enforcement before executing happy path tests.
@@ -207,22 +266,148 @@ step 38 executor  rerun_http_request     GET /v1/restaurants/nearby?lat=9.03&lng
 step 39 validator api_defect:replan      defect reproduced twice, replan around it. status_code: expected [400], got 200; range: out-of-range input got HTTP 200
 step 40 planner   replan                 added 2 neighbor tasks around confirmed defects (t_026, t_027)
 step 42 executor  call_http_request      GET /v1/restaurants/nearby?lat=9.03&lng=38.75&radius=-1 -> 200 (e_014)
-step 43 validator api_defect:next        same defect class as a known finding. status_code: expected [400], got 200; range: out-of-range input got HTTP 200
 step 45 executor  call_http_request      GET /v1/restaurants/nearby?lat=9.03&lng=38.75&radius=-100 -> 200 (e_015)
-step 46 validator api_defect:next        same defect class as a known finding. status_code: expected [400], got 200; range: out-of-range input got HTTP 200
-...
-step 81 executor  call_http_request      GET /v1/restaurants/nearby?lat=9.03&lng=38.75&radius=10.5 -> 400 (e_027)
 ...
 step 84 executor  blocked                25 calls already made to GET /v1/restaurants/nearby this run
-step 85 validator blocked:next           call blocked by the safety gate: blocked: 25 calls already made to GET /v1/restaurants/nearby this run
-step 86 planner   no_tasks_left          every task is done, handing over to the reporter
 step 87 reporter  COMPLETE               F1 confirmed (e_012, e_013, e_014, e_015)
 ```
 
-Failure (two 503s on the first call), recovery (backoff retry, then the real answer), critique (the validator flags `radius=0` and reruns it), replan (neighbor values `-1` and `-100`, both also accepted), and a confirmed finding citing four evidence ids. The model ordered auth and validation tests first, which is why `/v1/favorites` was the first call, and it added an extra `radius=10.5` test. The last task was stopped by the 25-calls-per-endpoint cap and reported inconclusive. The report's summary, written by the model and checked for unknown ids, reads:
+**Failure** (two 503s) → **recovery** (backoff retry) → **critique** (`radius=0` flagged, rerun) → **replan** (`-1`, `-100`) → **confirmed finding** with four evidence ids. The model put auth and validation first, and the call cap stopped one late task. Runs recorded since then also show the new opening steps: reading the project notes (`read_file`) and the pagination check (`run_python`). The summary the model wrote, checked for unknown ids:
 
 > We found finding F1, where out-of-range input returned an HTTP 200 status code instead of the expected HTTP 400 [e_012] [e_013] [e_014] [e_015].
 
-## 10. Evaluation
+---
 
-See [`eval/report.md`](eval/report.md): 9 scenarios (no bugs, each bug alone, all four, a bug under 503 faults, timeouts, an undocumented endpoint), with detection rate, false positives, recovery under faults, citation validity, steps and tool calls, and a trace line for each agentic behavior. Regenerate it with `python -m eval.run_eval` (add `--fake-llm` to run without an API key).
+## 📊 Evaluation
+
+Nine scenarios, each against a fresh demo server, with **gemini-3.5-flash** ([full one-page report](eval/report.md)):
+
+| # | Scenario | Result |
+|---|---|---|
+| 1 | no bugs (false-positive check) | ✅ 0 findings |
+| 2 | radius lower bound | ✅ validation, confirmed |
+| 3 | distance as string | ✅ schema |
+| 4 | missing `lng` → 500 | ✅ server error |
+| 5 | auth bypass | ✅ auth |
+| 6 | all four bugs | ✅ all four found |
+| 7 | radius bug + flaky 503 | ✅ found, retry shown in the trace |
+| 8 | hanging endpoint | ✅ inconclusive, report still written |
+| 9 | undocumented endpoint | ✅ asked the user, completed |
+
+**100% bug detection · 0 false positives · 100% recovery under faults · 100% valid citations · ~27 steps per run.**
+
+```bash
+.venv/bin/python -m eval.run_eval              # real model (about 18 Gemini calls)
+.venv/bin/python -m eval.run_eval --fake-llm   # free, about 20 seconds
+```
+
+---
+
+## 🖥️ Other ways to run it
+
+<details>
+<summary><b>Terminal (CLI)</b>: test any API from its spec</summary>
+
+```bash
+# the demo API, with some bugs switched on
+SEEDED_BUGS=BUG_RADIUS_MIN FAULTS=FAULT_503_THEN_OK .venv/bin/uvicorn target_api.main:app --port 9000
+
+# in a second terminal
+.venv/bin/python -m app.cli --spec target_api/openapi.yaml --base-url http://localhost:9000
+```
+
+Options: `--fake-llm`, `--non-interactive` (never pause), `--max-steps N`, `--max-tool-calls N`. Prints the decision log and findings, and writes `data/reports/<run_id>.md`. Point `--spec` and `--base-url` at any API you're allowed to test (GET only unless `allow_mutating` is set).
+</details>
+
+<details>
+<summary><b>REST service</b>: the agent behind an API</summary>
+
+```bash
+.venv/bin/uvicorn app.main:app --port 8000
+```
+
+| Method | Path | Purpose |
+|---|---|---|
+| `POST` | `/runs` | start a run: `{spec, base_url, config?}` → `{run_id}` |
+| `GET` | `/runs/{id}` | status, counters, pending question |
+| `GET` | `/runs/{id}/trace` | decision log |
+| `POST` | `/runs/{id}/resume` | answer a question: `{answer}` |
+| `GET` | `/runs/{id}/report` | markdown report |
+| `GET` | `/runs/{id}/details` | tasks, findings, evidence, statistics |
+| `GET` | `/health` | liveness |
+</details>
+
+<details>
+<summary><b>Tests</b></summary>
+
+```bash
+.venv/bin/pytest -q          # 51 tests, fake LLM, no API key, about 10 s
+```
+
+They cover every routing rule, the budget stop (no `GraphRecursionError`), the end-to-end bug hunt, all five tools in one run, pause and resume, the citation check, redaction, tool safety and the LLM fallback.
+</details>
+
+<details>
+<summary><b>Web UI development</b></summary>
+
+```bash
+.venv/bin/uvicorn app.main:app      # terminal 1
+cd frontend && npm run dev          # terminal 2: Vite on :5173 proxies the API
+scripts/demo.sh --rebuild           # rebuild the bundled UI after changes
+```
+</details>
+
+---
+
+## ⚙️ Configuration (`.env`)
+
+| Variable | Purpose |
+|---|---|
+| `GEMINI_API_KEY` | Gemini key (free tier: about 20 requests per day per model) |
+| `AGENT_MODEL` | e.g. `google_genai:gemini-3.5-flash`; empty means the fake LLM |
+| `TAVILY_API_KEY` | optional; without it `web_search` falls back to `rag_search` |
+| `WORKSPACE_DIR` | folder of project notes for `read_file` and `rag_search` (default `./workspace`) |
+| `TARGET_API_TOKEN` | bearer token sent to secured endpoints (demo: `test-token`) |
+
+---
+
+## 📁 Project layout
+
+```
+app/
+  graph.py            graph wiring, routers, initial state
+  state.py            AgentState and Task
+  config.py           RunConfig, budgets, Deps (runtime context)
+  spec.py             OpenAPI → endpoints → test tasks
+  checks.py           7 deterministic checks
+  consistency.py      pagination check (run_python script)
+  redact.py           secret masking
+  llm.py, prompts.py  Gemini via init_chat_model, fake LLM, the 4 prompts
+  nodes/              planner, executor, validator, ask_user, reporter
+  tools/              http_request, web_search, run_python, rag_search, read_file
+  cli.py, main.py     terminal runner, FastAPI service
+target_api/           demo API with switchable bugs and faults + openapi.yaml
+eval/                 scenarios.yaml, run_eval.py, report.md
+frontend/             React + TypeScript web demo
+workspace/            project notes the agent reads
+docs/                 architecture diagram and screenshots
+tests/                51 tests
+```
+
+---
+
+## 🩺 Troubleshooting
+
+| Symptom | Fix |
+|---|---|
+| `Address already in use` | an old server is still running: `lsof -i :8000 -i :9000`, then kill that PID |
+| The top bar says **fake LLM** | `AGENT_MODEL` is empty in `.env` |
+| A log line says `LLM call failed (… 429 RESOURCE_EXHAUSTED)` | the free daily quota is used up; the run still completes on safe defaults, and the quota resets daily |
+| The web UI doesn't reflect code changes | `scripts/demo.sh --rebuild` |
+| Runs disappeared | runs live in memory; restarting the service clears them |
+
+---
+
+## 🧭 Limitations and next steps
+
+The demo API has only GET endpoints, and only the documented contract is tested, not business rules. Each scenario used one model and one run, so variance isn't measured, and runs live in memory. Next steps: generate request bodies to test POST/PUT against a sandbox, spend the call budget by risk, run each scenario several times and with more than one model, and persist runs with `AsyncSqliteSaver`. More detail is in the [evaluation report](eval/report.md).
