@@ -1,0 +1,102 @@
+openapi: 3.1.0
+info:
+  title: Restaurant Finder API
+  version: 1.0.0
+  description: Small demo API that the testing agent checks against this contract.
+paths:
+  /v1/restaurants/nearby:
+    get:
+      operationId: listNearbyRestaurants
+      summary: List restaurants near a point, sorted by distance
+      parameters:
+        - name: lat
+          in: query
+          required: true
+          description: Latitude in degrees
+          schema: {type: number, minimum: -90, maximum: 90}
+        - name: lng
+          in: query
+          required: true
+          description: Longitude in degrees
+          schema: {type: number, minimum: -180, maximum: 180}
+        - name: radius
+          in: query
+          required: false
+          description: Search radius in meters
+          schema: {type: integer, minimum: 1, maximum: 50000, default: 5000}
+        - name: page
+          in: query
+          required: false
+          description: Page number, 5 results per page
+          schema: {type: integer, minimum: 1, default: 1}
+      responses:
+        "200":
+          description: Restaurants inside the radius
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/NearbyResponse"}
+        "400":
+          description: A parameter is missing, has the wrong type or is out of range
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Error"}
+  /v1/favorites:
+    get:
+      operationId: listFavorites
+      summary: List the caller's favorite restaurants
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: The caller's favorites
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/FavoritesResponse"}
+        "401":
+          description: Missing or invalid bearer token
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Error"}
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+  schemas:
+    Restaurant:
+      type: object
+      required: [id, name, cuisine, lat, lng, distance]
+      properties:
+        id: {type: string}
+        name: {type: string}
+        cuisine: {type: string}
+        lat: {type: number}
+        lng: {type: number}
+        distance: {type: number, description: Distance from the query point in meters}
+    NearbyResponse:
+      type: object
+      required: [page, total, results]
+      properties:
+        page: {type: integer, minimum: 1}
+        total: {type: integer, minimum: 0}
+        results:
+          type: array
+          items: {$ref: "#/components/schemas/Restaurant"}
+    FavoritesResponse:
+      type: object
+      required: [favorites]
+      properties:
+        favorites:
+          type: array
+          items:
+            type: object
+            required: [id, name]
+            properties:
+              id: {type: string}
+              name: {type: string}
+    Error:
+      type: object
+      required: [error, detail]
+      properties:
+        error: {type: string}
+        detail: {type: string}

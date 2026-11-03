@@ -1,0 +1,8 @@
+implementation_spec.md
+phases.md
+.venv/
+.env
+__pycache__/
+*.pyc
+.pytest_cache/
+data/reports/*.md
