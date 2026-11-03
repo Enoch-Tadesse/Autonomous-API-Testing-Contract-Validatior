@@ -18,6 +18,7 @@ def test_endpoints_parsed():
 
 
 def test_radius_tasks():
+    # radius is optional: leaving it out equals the normal case, so there is no "missing" task for it.
     cases = {}
     for t in tasks_for_param("'radius'"):
         value = t["request"]["query"].get("radius", "missing")
@@ -28,7 +29,6 @@ def test_radius_tasks():
         1: ("normal", [200]),
         50000: ("normal", [200]),
         50001: ("above_max", [400]),
-        "missing": ("missing_param", [200]),   # optional, so the default applies
         "abc": ("wrong_type", [400]),
     }
 

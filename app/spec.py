@@ -139,11 +139,9 @@ def param_cases(endpoint: dict, param: dict) -> list[tuple[str, str, Any, list[i
     step = 1 if kind == "integer" else 1.0
     cases = []
 
-    if param["in"] != "path":
-        if param.get("required"):
-            cases.append(("missing_param", f"omit required '{name}'", None, bad))
-        else:
-            cases.append(("missing_param", f"omit optional '{name}' (default applies)", None, ok))
+    # Leaving out an optional parameter is the same request as the normal case, so only required ones get a test.
+    if param["in"] != "path" and param.get("required"):
+        cases.append(("missing_param", f"omit required '{name}'", None, bad))
     if kind in ("integer", "number"):
         cases.append(("wrong_type", f"'{name}' as a non-numeric string", "abc", bad))
     if "minimum" in schema:
@@ -161,10 +159,11 @@ def generate_tasks(endpoints: list[dict]) -> list[Task]:
     """Normal case, then per-parameter edge cases, then a no-token case for secured endpoints."""
     tasks: list[Task] = []
 
-    def add(endpoint: dict, kind: str, objective: str, request: dict, expected: list[int]):
+    def add(endpoint: dict, kind: str, objective: str, request: dict, expected: list[int], param: str | None = None):
         schema = endpoint["responses"].get(expected[0]) if expected else None
         tasks.append(Task(
-            id=f"t_{len(tasks) + 1:03d}", endpoint=endpoint["key"], kind=kind, objective=objective,
+            id=f"t_{len(tasks) + 1:03d}", endpoint=endpoint["key"], kind=kind, tool="http_request", param=param,
+            objective=objective,
             request=request, expected_status=expected, expected_schema=schema,
             status="pending", outcome="unknown", attempts=0, parent_id=None,
         ))
@@ -179,7 +178,7 @@ def generate_tasks(endpoints: list[dict]) -> list[Task]:
                     drop_param(request, param)
                 else:
                     set_param(request, param, value)
-                add(ep, kind, objective, request, expected)
+                add(ep, kind, objective, request, expected, param=param["name"])
 
         if ep["secured"]:
             request = base_request(ep)

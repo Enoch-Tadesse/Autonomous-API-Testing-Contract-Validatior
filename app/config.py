@@ -1,6 +1,9 @@
 """Run configuration and budget helpers."""
 
+import os
 import time
+from dataclasses import dataclass, field
+from typing import Any
 
 from pydantic import BaseModel
 
@@ -34,3 +37,19 @@ def budget_exhausted(state: dict) -> str | None:
 def recursion_limit(config: dict) -> int:
     """LangGraph backstop. The budget guard always fires before this is reached."""
     return config["max_steps"] * 3 + 20
+
+
+@dataclass
+class Deps:
+    """Run-time dependencies handed to every node through LangGraph's context.
+
+    They live outside the state so they are never checkpointed, and tests can
+    swap in a fake LLM or an in-process HTTP transport.
+    """
+    llm: Any                                    # anything with `async structured(schema, prompt)`
+    http_transport: Any = None                  # httpx transport for http_request (tests use ASGITransport)
+    web_transport: Any = None                   # httpx transport for web_search (tests stub it)
+    auth_token: str = field(default_factory=lambda: os.environ.get("TARGET_API_TOKEN", "test-token"))
+    tavily_api_key: str = field(default_factory=lambda: os.environ.get("TAVILY_API_KEY", ""))
+    workspace_dir: str = field(default_factory=lambda: os.environ.get("WORKSPACE_DIR", "./workspace"))
+    backoff_scale: float = 1.0                  # tests set 0 so transient retries do not sleep

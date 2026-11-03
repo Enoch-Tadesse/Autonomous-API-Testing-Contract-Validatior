@@ -12,8 +12,10 @@ class Task(TypedDict):
     id: str                       # "t_007"
     endpoint: str                 # "GET /v1/restaurants/nearby"
     kind: str                     # normal | missing_param | wrong_type | below_min | above_max | no_auth | extra
+    tool: str                     # tool that runs this task, usually "http_request"
+    param: str | None             # parameter under test, None for whole-request tasks
     objective: str
-    request: dict[str, Any]       # method, path, query, headers, body
+    request: dict[str, Any]       # method, path, query, headers, body (or the tool's args for other tools)
     expected_status: list[int]    # empty list = no documented expectation (ambiguous)
     expected_schema: dict | None
     status: Literal["pending", "in_progress", "done", "failed"]
@@ -27,6 +29,7 @@ class AgentState(TypedDict, total=False):
     base_url: str
     config: dict                              # RunConfig as dict
     started_at: float                         # time.time() when the run started
+    spec_text: str                            # the OpenAPI document (YAML or JSON text)
     endpoints: list[dict]                     # parsed from OpenAPI
     tasks: list[Task]                         # the plan / to-do list (nodes replace the whole list)
     current_task_id: str | None
