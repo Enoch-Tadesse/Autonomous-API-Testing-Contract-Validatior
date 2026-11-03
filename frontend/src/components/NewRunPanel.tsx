@@ -2,8 +2,21 @@ import { useEffect, useState } from "react";
 import { AlertTriangle, Check, Loader2, Rocket } from "lucide-react";
 import { api } from "../lib/api";
 import { go } from "../lib/router";
-import { BUGS, FAULTS, PRESETS, type Preset } from "../lib/catalog";
+import { BUGS, FAULTS, HELP, PRESETS, type HelpKey, type Preset } from "../lib/catalog";
 import type { DemoInfo, DemoSpec } from "../lib/types";
+import InfoTip from "./InfoTip";
+
+// ?tip=bugs opens that tooltip on load (handy for screenshots and demos).
+const OPEN_TIP = new URLSearchParams(window.location.search).get("tip");
+
+function Label({ text, help, id }: { text: string; help: HelpKey; id?: string }) {
+  return (
+    <span className="label-with-tip">
+      <span id={id}>{text}</span>
+      <InfoTip label={text} title={HELP[help].title} lines={HELP[help].lines} initiallyOpen={OPEN_TIP === help} />
+    </span>
+  );
+}
 
 function Toggle({ id, title, detail, checked, onChange }: {
   id: string;
@@ -85,7 +98,7 @@ export default function NewRunPanel({ info }: { info: DemoInfo | null }) {
       </div>
       <div className="card-pad">
         <div className="field">
-          <span className="field-label">Scenario</span>
+          <span className="field-label"><Label text="Scenario" help="scenario" /></span>
           <div className="presets" role="group" aria-label="Scenario presets">
             {PRESETS.map((p) => (
               <button key={p.name} type="button" className="preset" aria-pressed={preset === p.name} onClick={() => applyPreset(p)}>
@@ -97,7 +110,7 @@ export default function NewRunPanel({ info }: { info: DemoInfo | null }) {
         </div>
 
         <div className="field">
-          <span className="field-label" id="spec-label">OpenAPI spec</span>
+          <span className="field-label"><Label text="OpenAPI spec" help="spec" id="spec-label" /></span>
           <div className="segmented" role="group" aria-labelledby="spec-label">
             {SPEC_CHOICES.map(([id, label]) => (
               <button key={id} type="button" aria-pressed={specId === id} onClick={() => { setSpecId(id); custom(); }}>
@@ -118,7 +131,7 @@ export default function NewRunPanel({ info }: { info: DemoInfo | null }) {
 
         <div className="field">
           <span className="field-label">
-            Seeded bugs <span className="subtle" style={{ fontWeight: 400 }}>{bugs.length} on</span>
+            <Label text="Seeded bugs" help="bugs" /> <span className="subtle" style={{ fontWeight: 400 }}>{bugs.length} on</span>
           </span>
           <div className="toggles">
             {Object.entries(BUGS).map(([id, b]) => (
@@ -130,7 +143,7 @@ export default function NewRunPanel({ info }: { info: DemoInfo | null }) {
 
         <div className="field">
           <span className="field-label">
-            Faults <span className="subtle" style={{ fontWeight: 400 }}>{faults.length} on</span>
+            <Label text="Faults" help="faults" /> <span className="subtle" style={{ fontWeight: 400 }}>{faults.length} on</span>
           </span>
           <div className="toggles">
             {Object.entries(FAULTS).map(([id, f]) => (
@@ -143,7 +156,7 @@ export default function NewRunPanel({ info }: { info: DemoInfo | null }) {
         <div className="field">
           <div className="switch-row">
             <span>
-              <span className="field-label" id="interactive-label">Ask me when unsure</span>
+              <span className="field-label"><Label text="Ask me when unsure" help="ask" id="interactive-label" /></span>
               <span className="helper">Pause on undocumented cases and wait for your answer.</span>
             </span>
             <button type="button" role="switch" className="switch" aria-checked={interactive}

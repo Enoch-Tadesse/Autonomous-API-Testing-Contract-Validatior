@@ -364,3 +364,22 @@ table.data tr.selected td { background: var(--accent-soft); }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; transition-duration: 0.01ms !important; }
 }
+
+/* ---------- info tooltips ---------- */
+.field-label { position: relative; }
+.label-with-tip { display: inline-flex; align-items: center; gap: 4px; }
+.infotip {
+  display: inline-grid; place-items: center; width: 28px; height: 28px; margin: -6px 0; padding: 0;
+  border: 0; border-radius: 50%; background: transparent; color: var(--fg-subtle); cursor: help;
+  transition: color 150ms var(--ease), background 150ms var(--ease);
+}
+.infotip:hover, .infotip[aria-expanded="true"] { color: var(--accent); background: var(--accent-soft); }
+.tooltip {
+  position: absolute; left: 0; right: 0; top: calc(100% + 6px); z-index: 30;
+  display: block; padding: var(--space-3) var(--space-4); border-radius: var(--radius);
+  background: var(--bg-elevated); border: 1px solid var(--border-strong); box-shadow: var(--shadow);
+  font-size: 13px; font-weight: 400; line-height: 1.5; color: var(--fg-muted); text-transform: none; letter-spacing: 0;
+}
+.tooltip-title { display: block; color: var(--fg); font-weight: 600; margin-bottom: 6px; }
+.tooltip ul { margin: 0; padding-left: 18px; }
+.tooltip li + li { margin-top: 4px; }
