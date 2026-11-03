@@ -16,14 +16,15 @@ def untrusted(text: str) -> str:
     return f"<<<UNTRUSTED>>>\n{text}\n<<<END>>>"
 
 
-def plan_prompt(tasks: list[dict], endpoints: list[dict]) -> str:
+def plan_prompt(tasks: list[dict], endpoints: list[dict], notes: str = "") -> str:
     lines = [f"{t['id']} {t['endpoint']} {t['kind']}: {t['objective']} -> expect {t['expected_status']}" for t in tasks]
     documented = [f"{e['key']} documents {sorted(e['responses'])}, params "
                   f"{[(p['name'], p.get('schema', {})) for p in e['parameters']]}" for e in endpoints]
     return (
         "You are planning API contract tests. The tests check that the API follows its OpenAPI contract.\n"
         "Endpoints:\n" + "\n".join(documented) + "\n\n"
-        "Generated tasks:\n" + "\n".join(lines) + "\n\n"
+        + (f"Project notes (from the workspace, use them as context):\n{notes[:3000]}\n\n" if notes else "")
+        + "Generated tasks:\n" + "\n".join(lines) + "\n\n"
         "1. `order`: every task id above, riskiest first. Put input validation and auth tests before "
         "happy paths. You may not drop tasks.\n"
         "2. `extra_tasks`: at most 5 new tests for gaps the generated tasks miss (for example a non-integer "

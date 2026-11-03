@@ -8,23 +8,22 @@ It is a LangGraph `StateGraph` (no `create_react_agent`, no message list): a pla
 
 ```mermaid
 flowchart LR
-    S([START]) --> P[Planner<br/>plan / to-do]
-    P -->|task pending| E[Executor<br/>calls tools]
-    P -->|no tasks or budget out| R[Reporter]
-    E --> V[Validator<br/>checks + critique]
-    E -.-> T[(Tools: http_request, web_search,<br/>run_python, rag_search, read_file)]
-    V -->|retry / rerun| E
-    V -->|defect found: replan<br/>or next task| P
-    V -->|ambiguous| A[Ask user]
-    A --> P
-    V -->|budget out| R
+    S([START]) --> P[Planner<br/>plan / to-do list]
+    P -->|next task| E[Executor<br/>runs one tool]
+    E <-->|call / result| T[(Tools<br/>http_request · web_search<br/>run_python · rag_search · read_file)]
+    E -->|redacted evidence| M[(Memory<br/>state + evidence log<br/>checkpointer)]
+    M --> V[Validator<br/>checks + critique]
+    V --> D{Decision<br/>router}
+    D -->|retry / rerun| E
+    D -->|next task / replan| P
+    D -->|ambiguous| A[Ask user<br/>interrupt]
+    A -->|answer| P
+    D -->|budget out| R[Reporter<br/>cited findings]
+    P -->|no tasks left / budget out| R
     R --> X([END])
-    M[(State + evidence memory<br/>checkpointer)] -.-> P
-    M -.-> E
-    M -.-> V
 ```
 
-The diagram source is `docs/architecture.mmd`; `docs/architecture.png` is exported from it with mermaid-cli (see section 2).
+Read it left to right: the **planner** picks a task, the executor runs one of the **tools**, the redacted result goes into **memory** (state and evidence, checkpointed), the **validator** checks it, and the **decision** router picks the next move. Source: `docs/architecture.mmd`; image: [`docs/architecture.png`](docs/architecture.png).
 
 | Folder | What is in it |
 |---|---|
@@ -56,10 +55,9 @@ python -m app.cli --spec target_api/openapi.yaml --base-url http://localhost:900
 # 3. or the agent as a service
 uvicorn app.main:app
 
-# tests, evaluation, diagram
+# tests and evaluation
 pytest -q
 python -m eval.run_eval                  # writes eval/report.md
-npx -y @mermaid-js/mermaid-cli -i docs/architecture.mmd -o docs/architecture.png -b white
 ```
 
 Seeded bugs (`SEEDED_BUGS=ID,ID`): `BUG_RADIUS_MIN` (accepts `radius <= 0`), `BUG_DISTANCE_STRING` (`distance` is a string), `BUG_MISSING_LNG_500` (missing `lng` gives 500), `BUG_AUTH_BYPASS` (favorites without a token). Faults (`FAULTS=ID,ID`): `FAULT_503_THEN_OK` (two 503s, then normal), `FAULT_TIMEOUT_ALWAYS` (`/v1/favorites` hangs). `POST /__admin/reset` clears fault counters.
@@ -146,15 +144,17 @@ How the validator classifies a result (rules first, LLM only when none fits):
 
 ## 6. Tools
 
-| Category | Tool | Limits | Fallback |
-|---|---|---|---|
-| Function calling | `http_request` | base URL allowlist, `POST/PUT/PATCH/DELETE` need `allow_mutating`, 25 calls per endpoint per run, request timeout, token inserted only at send time | none: the task becomes inconclusive |
-| Search | `web_search` | Tavily over `httpx`, top 5 results | `rag_search` |
-| Code and compute | `run_python` | `python -I` subprocess, empty env, temp dir, no shell, 5 s timeout, 4 KB output | none |
-| RAG | `rag_search` | keyword overlap over spec chunks and workspace docs, top 3; no match counts as a failure | `web_search` |
-| System | `read_file` | inside `WORKSPACE_DIR` only, path traversal rejected, 4 KB | `rag_search` |
+Every tool is used by the agent in a normal run, not only in tests:
 
-The planner uses `web_search` to look up docs when the spec leaves a case undocumented, and the question to the user quotes what it found. A tool with 5 failures in a row is no longer chosen. Before anything is stored, `redact.py` masks `Authorization`, `Cookie`, `X-API-Key`, fields named like `password`/`token`/`secret`, JWTs and bearer credentials. API responses are passed to the LLM between untrusted-data delimiters, with an instruction never to follow them.
+| Category | Tool | When the agent uses it | Limits | Fallback |
+|---|---|---|---|---|
+| Function calling | `http_request` | every contract test (normal, boundary, missing, wrong type, out of range, no token, pagination pages) | base URL allowlist, `POST/PUT/PATCH/DELETE` need `allow_mutating`, 25 calls per endpoint per run, request timeout, token inserted only at send time | none: the task becomes inconclusive |
+| System | `read_file` | first step: reads the project notes in `workspace/`, which go into the planning LLM call as context | inside `WORKSPACE_DIR` only, path traversal rejected, 4 KB | `rag_search` |
+| Code and compute | `run_python` | pagination check: after fetching page 1 and page 2, runs a generated script over both responses (no duplicate ids, item count within `total`, order kept across pages) | `python -I` subprocess, empty env, temp dir, no shell, 5 s timeout, 4 KB output | none |
+| Search | `web_search` | when the spec leaves a case undocumented: looks up what the status should be before asking the user | Tavily over `httpx`, top 5 results | `rag_search` |
+| RAG | `rag_search` | fallback for search and docs: keyword search over spec chunks and workspace docs | top 3 chunks; no match counts as a failure | `web_search` |
+
+The question to the user quotes what the lookup found. A tool with 5 failures in a row is no longer chosen. Every tool output is validated: HTTP responses by the deterministic checks, the `run_python` check by parsing and judging its JSON result, and the other tools for a usable result. Before anything is stored, `redact.py` masks `Authorization`, `Cookie`, `X-API-Key`, fields named like `password`/`token`/`secret`, JWTs and bearer credentials. API responses are passed to the LLM between untrusted-data delimiters, with an instruction never to follow them.
 
 ## 7. Stopping rules, retries and fallbacks
 

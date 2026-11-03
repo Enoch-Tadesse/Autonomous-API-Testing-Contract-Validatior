@@ -57,3 +57,17 @@ async def test_read_file_rejects_path_traversal(tmp_path):
     (tmp_path / "notes.txt").write_text("hello")
     assert (await call_tool("read_file", {"path": "notes.txt"}, ctx(tmp_path)))["output"] == "hello"
     assert not (await call_tool("read_file", {"path": "../../etc/passwd"}, ctx(tmp_path)))["ok"]
+
+
+async def test_pagination_check_script_catches_overlap_and_order():
+    from app.consistency import pagination_script, read_script_output
+
+    page1 = {"total": 6, "results": [{"id": "r1", "distance": 10}, {"id": "r2", "distance": 20}, {"id": "r3", "distance": 90}]}
+    page2 = {"total": 6, "results": [{"id": "r3", "distance": 90}, {"id": "r4", "distance": 40}]}
+    result = await call_tool("run_python", {"code": pagination_script([page1, page2], "results")}, ctx())
+    problems = read_script_output(result["output"])["problems"]
+    assert any("r3" in p for p in problems) and any("sorted" in p for p in problems)
+
+    clean = {"total": 3, "results": [{"id": "a", "distance": 1}, {"id": "b", "distance": 2}]}
+    result = await call_tool("run_python", {"code": pagination_script([clean, {"total": 3, "results": [{"id": "c", "distance": 3}]}], "results")}, ctx())
+    assert read_script_output(result["output"])["problems"] == []

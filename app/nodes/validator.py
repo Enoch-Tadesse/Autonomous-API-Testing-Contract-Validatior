@@ -15,6 +15,7 @@ import re
 from langgraph.runtime import Runtime
 
 from app.checks import failed, run_checks
+from app.consistency import read_script_output
 from app.config import Deps
 from app.llm import Critique
 from app.nodes.common import copy_tasks, describe_request, find, latest_critique, log
@@ -38,6 +39,8 @@ async def validator(state: dict, runtime: Runtime[Deps]) -> dict:
 
     if result.get("blocked"):
         v = verdict("blocked", "next", "inconclusive", f"call blocked by the safety gate: {result['error']}")
+    elif result["tool"] == "run_python" and task["kind"] == "consistency":
+        v = review_check(task, evidence, result)
     elif result["tool"] != "http_request":
         v = (verdict("ok", "next", "pass", f"{result['tool']} returned a result") if result["ok"] else
              verdict("infra_failure", "next", "inconclusive", f"{result['tool']} failed: {result['error']}"))
@@ -63,6 +66,28 @@ async def validator(state: dict, runtime: Runtime[Deps]) -> dict:
         update["pending_question"] = question_for(task, doc_hint(state, task))
         update["status"] = "awaiting_input"
     return update
+
+
+# ---------- cross-request checks (run_python) ----------
+
+def review_check(task: dict, evidence: dict | None, result: dict) -> dict:
+    """Validate the check script's own output, then turn any problems into a finding."""
+    if not result["ok"] or evidence is None:
+        return verdict("infra_failure", "next", "inconclusive", f"check script failed: {result.get('error')}")
+    report = read_script_output(evidence["response"].get("output") or "")
+    if report is None:
+        return verdict("test_error", "next", "inconclusive", "check script printed no valid JSON result")
+    inputs = evidence["request"].get("inputs", [])
+    if not report["problems"]:
+        return verdict("ok", "next", "pass", f"run_python: {', '.join(report['checked'])} on pages of sizes "
+                                             f"{report.get('page_sizes')} ({', '.join(inputs)})")
+    finding = {
+        "key": f"{task['endpoint']}|page|pagination", "endpoint": task["endpoint"], "task_id": task["id"],
+        "class": "pagination", "status": "suspected", "expected": "pages without overlap, within total, in order",
+        "actual": "; ".join(report["problems"]), "evidence_ids": [*inputs, evidence["id"]],
+        "repro": f"compare page 1 and page 2 ({', '.join(inputs)})",
+    }
+    return verdict("api_defect", "next", "defect", f"run_python found: {'; '.join(report['problems'])}", finding)
 
 
 # ---------- rules ----------

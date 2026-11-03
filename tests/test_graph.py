@@ -57,3 +57,27 @@ async def test_small_budget_stops_partial_without_recursion_error(monkeypatch, t
     assert state["stop_reason"] == "step_budget"
     assert state["steps"] == 3
     assert "Partial run" in state["report_md"] and "step_budget" in state["report_md"]
+
+
+async def test_one_run_uses_all_five_tools(monkeypatch, tmp_path):
+    """read_file (project notes), web_search -> rag_search (undocumented case), http_request (tests),
+    run_python (pagination check over two fetched pages)."""
+    monkeypatch.setenv("SEEDED_BUGS", "")
+    monkeypatch.setenv("FAULTS", "")
+    fault_counters.clear()
+    config = RunConfig(base_url="http://target", interactive=False)
+    graph = build_graph(InMemorySaver())
+    cfg = {"configurable": {"thread_id": "tools"}, "recursion_limit": recursion_limit(config.model_dump())}
+    deps = Deps(llm=FakeLLM(), http_transport=httpx.ASGITransport(app=target_app), backoff_scale=0,
+                reports_dir=str(tmp_path), tavily_api_key="")
+    spec = Path("target_api/openapi_undocumented.yaml").read_text()
+    state = await graph.ainvoke(initial_state("tools", spec, config), cfg, context=deps)
+
+    attempted = {e["tool"] for e in state["evidence"]}
+    fell_back = [e for e in state["decision_log"] if e["decision"] == "fallback" and "web_search" in e["reason"]]
+    assert {"http_request", "read_file", "rag_search", "run_python"} <= attempted and fell_back
+
+    check = next(t for t in state["tasks"] if t["kind"] == "consistency")
+    assert check["outcome"] == "pass"            # the clean API paginates correctly
+    plan = next(e for e in state["decision_log"] if e["decision"] == "plan")
+    assert "using the project notes" in plan["reason"]

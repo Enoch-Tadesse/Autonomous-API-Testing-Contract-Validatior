@@ -9,10 +9,12 @@
 
 import asyncio
 import copy
+import json
 
 from langgraph.runtime import Runtime
 
 from app.config import Deps
+from app.consistency import find_list_field, pagination_script
 from app.llm import FixedRequest
 from app.nodes.common import copy_tasks, describe_request, find, latest_critique, log
 from app.prompts import fix_request_prompt
@@ -62,7 +64,10 @@ async def executor(state: dict, runtime: Runtime[Deps]) -> dict:
         note("repair_request", f"retry {retries[key]}: {fix.rationale}")
 
     ctx = tool_context(state, deps)
-    blocked = gate(tool, args, ctx, state, task)
+    blocked = None
+    if task.get("depends_on"):
+        args, blocked = check_args(state, task)
+    blocked = blocked or gate(tool, args, ctx, state, task)
     if blocked:
         note("blocked", blocked)
         result, calls, used_tool = {"ok": False, "error": f"blocked: {blocked}", "blocked": True}, 0, tool
@@ -85,7 +90,12 @@ async def executor(state: dict, runtime: Runtime[Deps]) -> dict:
     label = "rerun" if mode == "rerun" else "call"
     outcome = result.get("status") or result.get("error") or "ok"
     chain = " -> ".join(transient + [str(outcome)])
-    target = describe_request(args) if used_tool == "http_request" else str(args)[:80]
+    if used_tool == "http_request":
+        target = describe_request(args)
+    elif used_tool == "run_python":
+        target = f"{args.get('check', 'snippet')} check over {', '.join(args.get('inputs', [])) or 'inline data'}"
+    else:
+        target = str(args)[:80]
     if not blocked:
         note(f"{label}_{used_tool}", f"{target} -> {chain}" + (f" ({evidence['id']})" if evidence else ""))
 
@@ -104,6 +114,24 @@ async def executor(state: dict, runtime: Runtime[Deps]) -> dict:
         "tool_calls": state.get("tool_calls", 0) + calls,
         "decision_log": entries,
     }
+
+
+def check_args(state: dict, task: dict) -> tuple[dict, str | None]:
+    """run_python arguments for a cross-request check, built from the evidence of the tasks it depends on."""
+    bodies, inputs = [], []
+    for dep in task["depends_on"]:
+        ev = next((e for e in reversed(state.get("evidence", []))
+                   if e["task_id"] == dep and e["tool"] == "http_request" and e["response"].get("status") == 200), None)
+        try:
+            bodies.append(json.loads(ev["response"]["body"]))
+        except (TypeError, ValueError, KeyError):
+            return {}, f"no usable response from {dep} to check"
+        inputs.append(ev["id"])
+    endpoint = next((e for e in state.get("endpoints", []) if e["key"] == task["endpoint"]), {})
+    ok = sorted(c for c in endpoint.get("responses", {}) if 200 <= c < 300)
+    field = find_list_field(endpoint["responses"][ok[0]]) if ok else None
+    code = pagination_script(bodies, field or "results")
+    return {"check": task["request"].get("check", "pagination"), "inputs": inputs, "code": code}, None
 
 
 def keep_tested_value(fixed: dict, original: dict, param: str | None) -> dict:

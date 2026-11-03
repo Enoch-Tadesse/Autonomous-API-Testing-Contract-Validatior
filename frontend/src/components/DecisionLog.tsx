@@ -20,7 +20,9 @@ function badgeFor(e: LogEntry): Badge | null {
   if (e.decision.endsWith(":retry") || e.decision === "repair_request") return { label: "retry", tone: "tone-amber" };
   if (e.reason.includes("retry 1/")) return { label: "retry", tone: "tone-amber" };
   if (e.decision.startsWith("infra_failure")) return { label: "infra", tone: "tone-amber" };
-  if (e.decision === "plan" || e.decision === "add_lookup") return { label: "plan", tone: "tone-violet" };
+  if (e.decision === "plan" || e.decision === "add_lookup" || e.decision === "add_check") return { label: "plan", tone: "tone-violet" };
+  if (e.decision === "read_docs" || e.decision === "call_read_file") return { label: "docs", tone: "tone-cyan" };
+  if (e.decision === "call_run_python") return { label: "compute", tone: "tone-violet" };
   if (e.decision.startsWith("llm_")) return { label: "llm critique", tone: "tone-blue" };
   return null;
 }

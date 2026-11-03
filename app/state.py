@@ -22,6 +22,7 @@ class Task(TypedDict):
     outcome: Literal["unknown", "pass", "defect", "inconclusive"]
     attempts: int
     parent_id: str | None         # set on follow-up tasks
+    depends_on: list[str]         # tasks whose results this one needs (e.g. the pages a check compares)
 
 
 class AgentState(TypedDict, total=False):
@@ -31,6 +32,7 @@ class AgentState(TypedDict, total=False):
     started_at: float                         # time.time() when the run started
     spec_text: str                            # the OpenAPI document (YAML or JSON text)
     endpoints: list[dict]                     # parsed from OpenAPI
+    planned: bool                             # the planning LLM call has run (after reading project notes)
     tasks: list[Task]                         # the plan / to-do list (nodes replace the whole list)
     current_task_id: str | None
     tool_name: str | None

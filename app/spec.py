@@ -165,7 +165,7 @@ def generate_tasks(endpoints: list[dict]) -> list[Task]:
             id=f"t_{len(tasks) + 1:03d}", endpoint=endpoint["key"], kind=kind, tool="http_request", param=param,
             objective=objective,
             request=request, expected_status=expected, expected_schema=schema,
-            status="pending", outcome="unknown", attempts=0, parent_id=None,
+            status="pending", outcome="unknown", attempts=0, parent_id=None, depends_on=[],
         ))
 
     for ep in endpoints:

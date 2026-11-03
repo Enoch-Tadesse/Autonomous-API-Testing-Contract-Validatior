@@ -74,6 +74,8 @@ function Tasks({ details }: { details: RunDetails }) {
 }
 
 function describe(e: Evidence): string {
+  if (e.tool === "run_python") return `run_python: ${String(e.request.check ?? "snippet")} check over ${((e.request.inputs as string[]) ?? []).join(", ")}`;
+  if (e.tool === "read_file") return `read_file: ${String(e.request.path ?? "")}`;
   if (e.tool !== "http_request") return `${e.tool}: ${JSON.stringify(e.request).slice(0, 80)}`;
   const q = Object.entries(e.request.query ?? {}).map(([k, v]) => `${k}=${v}`).join("&");
   return `${e.request.method ?? "GET"} ${e.request.path ?? ""}${q ? `?${q}` : ""}`;

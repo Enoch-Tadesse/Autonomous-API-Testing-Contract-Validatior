@@ -1,17 +1,21 @@
 """Planner (meta-tool: plan / to-do list).
 
 The only node that adds, reorders or cancels tasks.
-  first visit  -> generate tasks from the spec, one LLM call to order them and add extras
+  first visit  -> generate tasks from the spec; if the workspace has project notes, read them first (read_file)
+  plan visit   -> one LLM call, with the notes as context, to order tasks and add extras; add doc lookups
+                  for undocumented cases and the cross-request pagination check (run_python)
   after ask    -> apply the user's answer to the task that raised the question
   replan visit -> add neighbor tasks around confirmed defects
-  every visit  -> pick the next pending task
+  every visit  -> pick the next pending task whose inputs are ready
 """
 
 import re
+from pathlib import Path
 
 from langgraph.runtime import Runtime
 
 from app.config import Deps
+from app.consistency import pagination_tasks
 from app.llm import PlanOrder
 from app.nodes.common import copy_tasks, find, log
 from app.prompts import plan_prompt
@@ -20,6 +24,8 @@ from app.tools import FALLBACKS, UNAVAILABLE_AFTER, fallback_args
 
 MAX_EXTRA_TASKS = 5
 RANGE_KINDS = ("below_min", "above_max")
+NOTE_SUFFIXES = (".md", ".txt")
+MAX_NOTE_FILES = 2
 
 
 async def planner(state: dict, runtime: Runtime[Deps]) -> dict:
@@ -33,14 +39,18 @@ async def planner(state: dict, runtime: Runtime[Deps]) -> dict:
     if not tasks:
         endpoints = list_endpoints(load_spec(state["spec_text"]))
         tasks = generate_tasks(endpoints)
-        plan = await runtime.context.llm.structured(PlanOrder, plan_prompt(tasks, endpoints))
-        tasks = apply_plan(tasks, plan, endpoints)
-        lookups = add_doc_lookups(tasks)
         update["endpoints"] = endpoints
-        note("plan", f"{len(tasks)} tasks for {len(endpoints)} endpoints. {plan.rationale}")
-        if lookups:
-            note("add_lookup", f"{len(lookups)} case(s) have no documented response, searching docs first "
-                               f"({', '.join(t['id'] for t in lookups)})")
+        docs = add_docs_tasks(tasks, runtime.context.workspace_dir)
+        if docs:
+            names = ", ".join(t["request"]["path"] for t in docs)
+            note("read_docs", f"reading project notes ({names}) before planning, so the plan can use them")
+        else:
+            tasks = await make_plan(tasks, endpoints, "", runtime.context, note)
+            update["planned"] = True
+
+    elif not state.get("planned"):
+        tasks = await make_plan(tasks, endpoints, notes_from(state, tasks), runtime.context, note)
+        update["planned"] = True
 
     elif state.get("clarifications") and (task := find(tasks, state.get("current_task_id"))) and \
             task["status"] == "in_progress":
@@ -57,6 +67,57 @@ async def planner(state: dict, runtime: Runtime[Deps]) -> dict:
     update["tasks"] = tasks
     update["action"] = "start"
     return update
+
+
+async def make_plan(tasks: list[dict], endpoints: list[dict], notes: str, deps: Deps, note) -> list[dict]:
+    """The one planning LLM call, then the tasks the plan always needs: doc lookups and cross-request checks."""
+    pending = [t for t in tasks if t["status"] == "pending"]
+    plan = await deps.llm.structured(PlanOrder, plan_prompt(pending, endpoints, notes))
+    tasks = apply_plan(tasks, plan, endpoints)
+    note("plan", f"{len(tasks)} tasks for {len(endpoints)} endpoints"
+                 f"{', using the project notes' if notes else ''}. {plan.rationale}")
+
+    lookups = add_doc_lookups(tasks)
+    if lookups:
+        note("add_lookup", f"{len(lookups)} case(s) have no documented response, searching docs first "
+                           f"({', '.join(t['id'] for t in lookups)})")
+    checks = pagination_tasks(endpoints, tasks, new_task)
+    if checks:
+        # Early in the list, so the per-endpoint call budget never squeezes them out.
+        tasks[len(lookups):len(lookups)] = checks
+        ids = [t["id"] for t in checks]
+        note("add_check", f"pagination check: fetch pages ({', '.join(ids[:-1])}), then run_python compares them "
+                          f"({ids[-1]})")
+    return tasks
+
+
+def add_docs_tasks(tasks: list[dict], workspace_dir: str) -> list[dict]:
+    """A read_file task for each project note in the workspace (at most two), placed first."""
+    workspace = Path(workspace_dir)
+    files = sorted(p for p in workspace.glob("*") if p.suffix in NOTE_SUFFIXES and p.is_file()) if workspace.is_dir() else []
+    docs = []
+    for path in files[:MAX_NOTE_FILES]:
+        task = new_task(tasks + docs, {"key": "workspace", "responses": {}}, "docs",
+                        f"read project notes {path.name}", {"path": path.name}, [])
+        task["tool"] = "read_file"
+        docs.append(task)
+    tasks[:0] = docs
+    return docs
+
+
+def notes_from(state: dict, tasks: list[dict]) -> str:
+    """Text the docs tasks read (read_file output, or rag_search hits if it fell back)."""
+    doc_ids = {t["id"] for t in tasks if t["kind"] == "docs"}
+    parts = []
+    for e in state.get("evidence", []):
+        if e["task_id"] not in doc_ids:
+            continue
+        output = e["response"].get("output")
+        if isinstance(output, str):
+            parts.append(output)
+        elif isinstance(output, list):
+            parts += [hit.get("text", "") for hit in output if isinstance(hit, dict)]
+    return "\n\n".join(p for p in parts if p).strip()
 
 
 def apply_plan(tasks: list[dict], plan: PlanOrder, endpoints: list[dict]) -> list[dict]:
@@ -86,7 +147,7 @@ def new_task(tasks: list[dict], endpoint: dict, kind: str, objective: str, reque
         "id": f"t_{next_number:03d}", "endpoint": endpoint["key"], "kind": kind, "tool": "http_request",
         "param": param, "objective": objective, "request": request, "expected_status": expected,
         "expected_schema": endpoint["responses"].get(expected[0]) if expected else None,
-        "status": "pending", "outcome": "unknown", "attempts": 0, "parent_id": parent_id,
+        "status": "pending", "outcome": "unknown", "attempts": 0, "parent_id": parent_id, "depends_on": [],
     }
 
 
@@ -119,7 +180,7 @@ def add_followups(tasks: list[dict], endpoints: list[dict]) -> list[dict]:
             continue
         endpoint = endpoints_by_key[parent["endpoint"]]
         position = tasks.index(parent) + 1
-        tested = {t["request"]["query"].get(parent["param"]) for t in tasks if t["endpoint"] == parent["endpoint"]}
+        tested = {t["request"].get("query", {}).get(parent["param"]) for t in tasks if t["endpoint"] == parent["endpoint"]}
         for value in neighbor_values(parent, endpoint, tested):
             request = {**parent["request"], "query": {**parent["request"]["query"], parent["param"]: value}}
             kind = "below_min" if value < schema_of(endpoint, parent["param"]).get("minimum", value) else "above_max"
@@ -171,6 +232,13 @@ def pick_next(tasks: list[dict], state: dict, note) -> dict:
     failures = state.get("tool_failures", {})
     for task in tasks:
         if task["status"] != "pending":
+            continue
+        inputs = [find(tasks, d) for d in task.get("depends_on") or []]
+        if any(d is not None and d["status"] != "done" for d in inputs):
+            continue  # its inputs (e.g. the pages to compare) are not fetched yet
+        if any(d is None or d["outcome"] not in ("pass", "defect") for d in inputs):
+            task.update(status="done", outcome="inconclusive")
+            note("skip_task", f"{task['id']}: its inputs ({', '.join(task['depends_on'])}) did not produce a response")
             continue
         tool, args = task["tool"], task["request"]
         if failures.get(tool, 0) >= UNAVAILABLE_AFTER:
