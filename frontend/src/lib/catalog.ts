@@ -4,6 +4,7 @@ export const BUGS: Record<string, { title: string; detail: string }> = {
   BUG_DISTANCE_STRING: { title: "Distance as string", detail: "breaks the response schema" },
   BUG_MISSING_LNG_500: { title: "Missing lng → 500", detail: "server error instead of 400" },
   BUG_AUTH_BYPASS: { title: "Auth bypass", detail: "favorites without a token" },
+  BUG_PAGE_OVERLAP: { title: "Page overlap", detail: "page 2 repeats the last item of page 1" },
 };
 
 export const FAULTS: Record<string, { title: string; detail: string }> = {
@@ -26,7 +27,7 @@ export const PRESETS: Preset[] = [
   { name: "Clean API", spec: "standard", bugs: [], faults: [], interactive: false,
     blurb: "false-positive check: expect 0 findings" },
   { name: "All bugs", spec: "standard", bugs: Object.keys(BUGS), faults: [], interactive: false,
-    blurb: "four defect classes in one run" },
+    blurb: "five defect types in one run" },
   { name: "Ask me", spec: "undocumented", bugs: [], faults: [], interactive: true,
     blurb: "agent pauses and asks you a question" },
 ];
@@ -40,7 +41,7 @@ export const HELP: Record<HelpKey, { title: string; lines: string[] }> = {
     lines: [
       "Showcase: radius bug + flaky 503. Shows retry, rerun, replan and one confirmed finding.",
       "Clean API: nothing broken. A correct API should get 0 findings (false-positive check).",
-      "All bugs: four defect types (validation, schema, server error, auth) in one run.",
+      "All bugs: five defect types (validation, schema, server error, auth, pagination) in one run.",
       "Ask me: undocumented spec. The agent pauses and asks you what to expect.",
       "Changing any option below turns it into a custom run.",
     ],
@@ -62,6 +63,7 @@ export const HELP: Record<HelpKey, { title: string; lines: string[] }> = {
       "Distance as string: breaks the response schema → schema finding.",
       "Missing lng → 500: crashes instead of 400 → server error finding.",
       "Auth bypass: favorites without a token → auth finding.",
+      "Page overlap: each page looks valid alone, so only comparing them catches it → run_python raises a suspected pagination finding.",
     ],
   },
   faults: {

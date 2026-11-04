@@ -10,6 +10,7 @@ const CLASS_LABEL: Record<string, string> = {
   schema: "response schema",
   server_error: "server error",
   auth: "authentication",
+  pagination: "pagination",
   contract: "contract",
 };
 

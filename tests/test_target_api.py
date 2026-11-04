@@ -60,10 +60,15 @@ def bug_symptom(client, bug_id: str) -> bool:
         return client.get(NEARBY, params={"lat": 9.03}).status_code == 500
     if bug_id == "BUG_AUTH_BYPASS":
         return client.get("/v1/favorites").status_code == 200
+    if bug_id == "BUG_PAGE_OVERLAP":
+        wide = {**GOOD_QUERY, "radius": 50000}
+        page1 = client.get(NEARBY, params={**wide, "page": 1}).json()["results"]
+        page2 = client.get(NEARBY, params={**wide, "page": 2}).json()["results"]
+        return page1[-1]["id"] == page2[0]["id"]
     raise ValueError(bug_id)
 
 
-BUGS = ["BUG_RADIUS_MIN", "BUG_DISTANCE_STRING", "BUG_MISSING_LNG_500", "BUG_AUTH_BYPASS"]
+BUGS = ["BUG_RADIUS_MIN", "BUG_DISTANCE_STRING", "BUG_MISSING_LNG_500", "BUG_AUTH_BYPASS", "BUG_PAGE_OVERLAP"]
 
 
 @pytest.mark.parametrize("bug_id", BUGS)

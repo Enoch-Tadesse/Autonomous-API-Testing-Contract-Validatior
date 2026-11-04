@@ -35,7 +35,7 @@ FAVORITES = [{"id": "r1", "name": "Blue Nile"}, {"id": "r4", "name": "Sheger Caf
 # Fault counters, cleared by POST /__admin/reset.
 fault_counters: dict[str, int] = {}
 
-BUG_IDS = ["BUG_RADIUS_MIN", "BUG_DISTANCE_STRING", "BUG_MISSING_LNG_500", "BUG_AUTH_BYPASS"]
+BUG_IDS = ["BUG_RADIUS_MIN", "BUG_DISTANCE_STRING", "BUG_MISSING_LNG_500", "BUG_AUTH_BYPASS", "BUG_PAGE_OVERLAP"]
 FAULT_IDS = ["FAULT_503_THEN_OK", "FAULT_TIMEOUT_ALWAYS"]
 # Set by POST /__admin/config (the web demo). None means "use the env var".
 overrides: dict[str, set[str] | None] = {"SEEDED_BUGS": None, "FAULTS": None}
@@ -142,7 +142,7 @@ async def nearby(request: Request):
             matches.append({**r, "distance": str(d) if bug("BUG_DISTANCE_STRING") else d})
     matches.sort(key=lambda m: float(m["distance"]))
 
-    start = (page - 1) * PAGE_SIZE
+    start = (page - 1) * PAGE_SIZE - (1 if bug("BUG_PAGE_OVERLAP") and page > 1 else 0)  # repeats the last item
     return {"page": page, "total": len(matches), "results": matches[start:start + PAGE_SIZE]}
 
 

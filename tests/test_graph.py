@@ -81,3 +81,17 @@ async def test_one_run_uses_all_five_tools(monkeypatch, tmp_path):
     assert check["outcome"] == "pass"            # the clean API paginates correctly
     plan = next(e for e in state["decision_log"] if e["decision"] == "plan")
     assert "using the project notes" in plan["reason"]
+
+
+async def test_page_overlap_is_only_caught_by_the_run_python_check(monkeypatch, tmp_path):
+    state = await run_agent(monkeypatch, tmp_path, bugs="BUG_PAGE_OVERLAP")
+
+    findings = merge_findings(state["findings"])
+    assert [f["class"] for f in findings] == ["pagination"]      # every single-response test still passes
+    assert findings[0]["status"] == "suspected"
+    assert "items on both page 1 and page 2" in findings[0]["actual"]
+
+    check = next(t for t in state["tasks"] if t["kind"] == "consistency")
+    assert check["outcome"] == "defect"
+    tools = {e["id"]: e["tool"] for e in state["evidence"]}
+    assert sorted(tools[i] for i in findings[0]["evidence_ids"]) == ["http_request", "http_request", "run_python"]

@@ -13,7 +13,7 @@ every finding cites its evidence.
 ![Gemini](https://img.shields.io/badge/LLM-Gemini-4285F4?logo=google&logoColor=white)
 ![FastAPI](https://img.shields.io/badge/FastAPI-service-009688?logo=fastapi&logoColor=white)
 ![React](https://img.shields.io/badge/React-web%20demo-61DAFB?logo=react&logoColor=black)
-![Tests](https://img.shields.io/badge/tests-51%20passing-22C55E)
+![Tests](https://img.shields.io/badge/tests-53%20passing-22C55E)
 ![Eval](https://img.shields.io/badge/eval-9%2F9%20·%20100%25%20detection%20·%200%20false%20positives-22C55E)
 
 ![Web demo: overview and New run panel](docs/screenshots/overview.png)
@@ -31,7 +31,7 @@ every finding cites its evidence.
 | 5 tools from the execution categories | `http_request` · `web_search` · `run_python` · `rag_search` · `read_file`, all used in a normal run | [Tools](#-tools) |
 | Meta-tools | plan/to-do (planner) · critique (validator) · ask user (`interrupt`) · tool selection (fallbacks) | [Agent pattern](#-agent-pattern) |
 | Task state, validated outputs, citations, explained decisions | `Task` status and outcome · 7 deterministic checks on every response · evidence ids plus a citation check · `decision_log` with a reason for every step | [State](#-state), [Workflow](#-workflow) |
-| Runnable code and setup | one-command demo, CLI, REST service, 51 tests | [Quick start](#-quick-start) |
+| Runnable code and setup | one-command demo, CLI, REST service, 53 tests | [Quick start](#-quick-start) |
 | Architecture diagram | planner → tools → memory → validation → decision | [`docs/architecture.png`](docs/architecture.png) |
 | One-page evaluation | 9 scenarios, success rate, failures, limitations, improvements, agentic behavior | [`eval/report.md`](eval/report.md) |
 
@@ -68,7 +68,7 @@ Open **http://localhost:8000**. Ctrl+C stops both servers.
 | 4 | Open the **Report** tab | the final markdown report; every `[e_…]` citation is clickable |
 | 5 | Click **Clean API**, then **Launch run** | **0 findings**: the false-positive check |
 | 6 | Click **Ask me**, then **Launch run** | the run pauses and asks what an undocumented case should return; click **401** and it finishes |
-| 7 | Click **All bugs**, then **Launch run** | four findings: validation, schema, server error, auth |
+| 7 | Click **All bugs**, then **Launch run** | five findings: validation, schema, server error, auth, pagination |
 | 8 | Open the **Evaluation** page | the 9-scenario report |
 
 <p align="center">
@@ -341,7 +341,7 @@ Options: `--fake-llm`, `--non-interactive` (never pause), `--max-steps N`, `--ma
 <summary><b>Tests</b></summary>
 
 ```bash
-.venv/bin/pytest -q          # 51 tests, fake LLM, no API key, about 10 s
+.venv/bin/pytest -q          # 53 tests, fake LLM, no API key, about 10 s
 ```
 
 They cover every routing rule, the budget stop (no `GraphRecursionError`), the end-to-end bug hunt, all five tools in one run, pause and resume, the citation check, redaction, tool safety and the LLM fallback.
@@ -391,7 +391,7 @@ eval/                 scenarios.yaml, run_eval.py, report.md
 frontend/             React + TypeScript web demo
 workspace/            project notes the agent reads
 docs/                 architecture diagram and screenshots
-tests/                51 tests
+tests/                53 tests
 ```
 
 ---
