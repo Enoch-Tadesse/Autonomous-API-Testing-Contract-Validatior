@@ -25,6 +25,20 @@ async def test_http_request_fills_in_token():
 def test_http_safety_gate():
     c = ctx()
     assert safety_problem(HttpArgs(path="http://evil.example/x"), c)
+    # Text-prefix tricks: these start with the base URL but go to another host.
+    assert safety_problem(HttpArgs(path="http://target.evil.example/x"), c)
+    assert safety_problem(HttpArgs(path="@evil.example/x"), c)
+    assert safety_problem(HttpArgs(path=".evil.example/x"), c)
+    assert safety_problem(HttpArgs(path="http://target:9999/x"), c)
+    assert safety_problem(HttpArgs(path="https://target/x"), c)
+    # With a port these are not even valid URLs: blocked, not a crash inside the HTTP client.
+    with_port = ctx(base_url="http://localhost:9000")
+    assert safety_problem(HttpArgs(path="http://localhost:9000.evil.example/x"), with_port)
+    assert safety_problem(HttpArgs(path=".evil.example/x"), with_port)
+    assert safety_problem(HttpArgs(path="/v1/favorites"), with_port) is None
+    # Normal requests stay allowed, by path or by full URL on the same host.
+    assert safety_problem(HttpArgs(path="/v1/favorites"), c) is None
+    assert safety_problem(HttpArgs(path="http://target/v1/favorites"), c) is None
     assert safety_problem(HttpArgs(method="DELETE", path="/v1/favorites"), c)
     assert safety_problem(HttpArgs(method="DELETE", path="/v1/favorites"), ctx(allow_mutating=True)) is None
 

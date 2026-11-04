@@ -25,9 +25,20 @@ def build_url(base_url: str, path: str) -> str:
     return path if path.startswith(("http://", "https://")) else base_url.rstrip("/") + path
 
 
+def same_origin(url: str, base_url: str) -> bool:
+    """Parsed comparison, because a text prefix is fooled by "http://target.evil.com" or "http://target@evil.com"."""
+    try:
+        target, base = httpx.URL(url), httpx.URL(base_url)
+    except httpx.InvalidURL:
+        return False
+    return (not target.userinfo
+            and (target.scheme, target.host, target.port) == (base.scheme, base.host, base.port)
+            and target.path.startswith(base.path.rstrip("/")))
+
+
 def safety_problem(args: HttpArgs, ctx: ToolContext) -> str | None:
     """Reason the call is not allowed, or None. Checked before any network traffic."""
-    if not build_url(ctx.base_url, args.path).startswith(ctx.base_url.rstrip("/")):
+    if not same_origin(build_url(ctx.base_url, args.path), ctx.base_url):
         return f"URL outside the allowed base URL {ctx.base_url}"
     if args.method.upper() in MUTATING and not ctx.allow_mutating:
         return f"{args.method} needs allow_mutating=true"
